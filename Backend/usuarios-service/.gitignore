@@ -1,0 +1,16 @@
+# Entorno virtual
+.venv/
+venv/
+env/
+
+# Variables de entorno (nunca versionar secretos)
+.env
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
