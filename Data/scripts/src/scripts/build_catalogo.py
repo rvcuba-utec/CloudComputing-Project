@@ -15,6 +15,7 @@ Reglas:
   - Stock sintético determinista (seed fija): 1-500 unidades, ~5% agotado.
 """
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -39,8 +40,29 @@ def nombre_legible(slug: str) -> str:
     return " ".join(palabra.capitalize() for palabra in str(slug).split("-"))
 
 
+def parse_precio(valor) -> float:
+    if valor is None:
+        return np.nan
+
+    s = str(valor).strip()
+    if s == "" or s.lower() == "nan":
+        return np.nan
+
+    # Formato de miles: "1,449" o "1,349.90" -> quitar las comas.
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", s):
+        s = s.replace(",", "")
+    elif "," in s:
+        # Precio múltiple ("69.90,99.90"): tomar el primer valor (el más bajo).
+        s = s.split(",")[0]
+
+    try:
+        return float(s)
+    except ValueError:
+        return np.nan
+
+
 def consolidar_precios(df: pd.DataFrame) -> pd.DataFrame:
-    precios = df[PRECIO_COLS].apply(pd.to_numeric, errors="coerce")
+    precios = df[PRECIO_COLS].apply(lambda col: col.map(parse_precio))
     df["precio"] = precios.bfill(axis=1).iloc[:, 0].round(2)
     df = df[df["precio"].notna() & (df["precio"] > 0)].copy()
 

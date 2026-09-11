@@ -15,7 +15,7 @@ MAX_WORKERS = 6
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))  # Data/
 CSV_DIR = os.path.join(BASE_DIR, "csv")
 IMAGES_FOLDER = os.path.join(CSV_DIR, "imagenes")
-OUTPUT_CSV_FILE = os.path.join(CSV_DIR, "falabella_completo.csv")
+OUTPUT_CSV_FILE = os.path.join(CSV_DIR, "products.csv")
 
 HEADERS = {
     "User-Agent": (
