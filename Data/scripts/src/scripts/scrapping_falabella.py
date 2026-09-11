@@ -9,10 +9,10 @@ import os
 import re
 import json
 
-LIMIT_PER_CATEGORY = 600
+LIMIT_PER_CATEGORY = 10
 MAX_WORKERS = 6
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))  # Data/
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CSV_DIR = os.path.join(BASE_DIR, "csv")
 IMAGES_FOLDER = os.path.join(CSV_DIR, "imagenes")
 OUTPUT_CSV_FILE = os.path.join(CSV_DIR, "products.csv")
@@ -107,10 +107,21 @@ def clean_file_name(name):
 def html_to_description(html_text):
     if not html_text:
         return None
-    text = html_text.replace("</p>", "\n").replace("<br>", "\n").replace("<br/>", "\n")
+
+    # 1. ELIMINAR CSS Y SCRIPTS: Borra las etiquetas <style> y <script> junto con todo su contenido
+    text = re.sub(r"<style[^>]*>[\s\S]*?</style>", "", html_text, flags=re.IGNORECASE)
+    text = re.sub(r"<script[^>]*>[\s\S]*?</script>", "", text, flags=re.IGNORECASE)
+
+    # 2. Formatear saltos de línea
+    text = text.replace("</p>", "\n").replace("<br>", "\n").replace("<br/>", "\n")
+
+    # 3. Eliminar cualquier otra etiqueta HTML sobrante (ahora seguro, sin que quede CSS colgado)
     text = re.sub(r"<[^>]+>", "", text)
+
+    # 4. Decodificar entidades HTML y limpiar espacios
     text = unescape(text)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+
     return "<br>".join(lines)
 
 
