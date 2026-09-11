@@ -1,0 +1,16 @@
+services:
+  usuarios:
+    build: ./users-address
+    image: maxwellcs07/cloudshop-usuarios
+    env_file: .env
+    restart: unless-stopped
+    ports:
+      - 8000:8000
+
+  catalogo:
+    build: ./products
+    image: maxwellcs07/cloudshop-catalogo
+    env_file: .env
+    restart: unless-stopped
+    ports:
+      - 8080:8080

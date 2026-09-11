@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CloudShop - MV de APLICACION (Docker). Abre 22, 80, 8000 (usuarios) y 8080 (catalogo)."
+
+Parameters:
+  InstanceName:
+    Type: String
+    Default: "MV App CloudShop"
+    Description: "Nombre de la instancia a crear"
+  AMI:
+    Type: String
+    Default: "ami-0b33d2f1547e52c78"
+    Description: "ID de AMI (Cloud9Ubuntu22 con Docker)"
+  InstanceType:
+    Type: String
+    Default: "t3.micro"
+    Description: "Tipo de instancia"
+
+Resources:
+  EC2Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      Tags:
+        - Key: "Name"
+          Value: !Ref InstanceName
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceType
+      KeyName: "vockey"
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: "20"
+
+  InstanceSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "CloudShop App: SSH 22, HTTP 80, usuarios 8000, catalogo 8080"
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: "tcp"
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: "tcp"
+          FromPort: "8000"
+          ToPort: "8000"
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: "tcp"
+          FromPort: "8080"
+          ToPort: "8080"
+          CidrIp: "0.0.0.0/0"
+
+Outputs:
+  InstanceId:
+    Description: "ID de la instancia EC2"
+    Value: !Ref EC2Instance
+  InstancePublicIP:
+    Description: "IP publica de la instancia"
+    Value: !GetAtt EC2Instance.PublicIp
+  InstancePrivateIP:
+    Description: "IP privada (usar en el .env del backend)"
+    Value: !GetAtt EC2Instance.PrivateIp
+  AppSecurityGroupId:
+    Description: "ID del security group de la MV app (para la MV de datos)"
+    Value: !Ref InstanceSecurityGroup
