@@ -1,0 +1,24 @@
+[project]
+name = "scripts"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "rvcuba-utec", email = "renzo.cuba@utec.edu.pe" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "faker>=40.38.0",
+    "pandas>=3.0.5",
+    "passlib[bcrypt]>=1.7.4",
+    "playwright>=1.62.0",
+    "python-dotenv>=1.2.3",
+    "requests>=2.34.2",
+]
+
+[project.scripts]
+scripts = "scripts:main"
+
+[build-system]
+requires = ["uv_build>=0.12.8,<0.13.0"]
+build-backend = "uv_build"

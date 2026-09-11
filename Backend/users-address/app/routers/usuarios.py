@@ -12,6 +12,15 @@ router = APIRouter(prefix="/usuarios", tags=["usuarios"])
 
 
 @router.get(
+    "/me",
+    response_model=UsuarioOut,
+    summary="Perfil del usuario autenticado (desde el token)",
+)
+def get_me(current: Usuario = Depends(get_current_user)):
+    return current
+
+
+@router.get(
     "/{usuario_id}",
     response_model=UsuarioOut,
     summary="Obtiene el perfil del usuario autenticado",
@@ -40,7 +49,7 @@ def get_usuario(
 @router.patch(
     "/{usuario_id}",
     response_model=UsuarioOut,
-    summary="Actualiza el nombre del usuario autenticado",
+    summary="Actualiza el perfil del usuario autenticado",
 )
 def update_usuario(
     usuario_id: int,
@@ -61,7 +70,15 @@ def update_usuario(
             detail="Usuario no encontrado.",
         )
 
-    usuario.nombre = payload.nombre
+    if payload.nombre is not None:
+        usuario.nombre = payload.nombre
+    if payload.estado is not None:
+        usuario.estado = payload.estado
+    if payload.nombre is None and payload.estado is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Debes enviar al menos 'nombre' o 'estado'.",
+        )
     db.commit()
     db.refresh(usuario)
 

@@ -1,5 +1,7 @@
 """Esquemas Pydantic para usuarios (entradas y salidas de la API)."""
 
+from typing import Literal, Optional
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
@@ -18,13 +20,15 @@ class UsuarioLogin(BaseModel):
 
 
 class UsuarioUpdate(BaseModel):
-    nombre: str = Field(..., min_length=1, max_length=120)
+    nombre: Optional[str] = Field(None, min_length=1, max_length=120)
+    estado: Optional[Literal["activo", "inactivo"]] = None
 
 
 class UsuarioOut(BaseModel):
     id: int
     nombre: str
     email: EmailStr
+    estado: str
 
     model_config = ConfigDict(from_attributes=True)
 

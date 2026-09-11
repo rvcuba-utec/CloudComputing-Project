@@ -13,5 +13,10 @@ class DireccionCreate(BaseModel):
 class DireccionOut(DireccionCreate):
     id: int
     usuario_id: int
+    es_principal: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DireccionUpdate(BaseModel):
+    es_principal: bool

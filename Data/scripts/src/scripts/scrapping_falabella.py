@@ -9,11 +9,13 @@ import os
 import re
 import json
 
-LIMIT_PER_CATEGORY = 1000
+LIMIT_PER_CATEGORY = 600
 MAX_WORKERS = 6
 
-IMAGES_FOLDER = "imagenes"
-OUTPUT_CSV_FILE = "falabella_completo.csv"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))  # Data/
+CSV_DIR = os.path.join(BASE_DIR, "csv")
+IMAGES_FOLDER = os.path.join(CSV_DIR, "imagenes")
+OUTPUT_CSV_FILE = os.path.join(CSV_DIR, "falabella_completo.csv")
 
 HEADERS = {
     "User-Agent": (
@@ -23,13 +25,63 @@ HEADERS = {
 }
 
 categories = {
-    "tecnologia": "https://www.falabella.com.pe/falabella-pe/category/cat40793/Tecnologia",
-    "electrohogar": "https://www.falabella.com.pe/falabella-pe/category/cat40584/Electrohogar",
-    "muebles": "https://www.falabella.com.pe/falabella-pe/category/cat50684/Dormitorio",
-    "belleza-higiene-salud": "https://www.falabella.com.pe/falabella-pe/category/cat40498/Belleza--higiene-y-salud",
-    "deportes": "https://www.falabella.com.pe/falabella-pe/category/cat40571/Deportes-y-aire-libre",
-    "automotriz": "https://www.falabella.com.pe/falabella-pe/category/CATG11944/Automotriz",
-    "hombre": "https://www.falabella.com.pe/falabella-pe/category/CATG12022/Hombre",
+    # Tecnología y Computación
+    "celulares": "https://www.falabella.com.pe/falabella-pe/search?Ntt=celulares",
+    "laptops": "https://www.falabella.com.pe/falabella-pe/search?Ntt=laptops",
+    "televisores": "https://www.falabella.com.pe/falabella-pe/search?Ntt=televisores",
+    "audifonos": "https://www.falabella.com.pe/falabella-pe/search?Ntt=audifonos",
+    "smartwatches": "https://www.falabella.com.pe/falabella-pe/search?Ntt=smartwatches",
+    "consolas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=consolas",
+    "monitores": "https://www.falabella.com.pe/falabella-pe/search?Ntt=monitores",
+    "impresoras": "https://www.falabella.com.pe/falabella-pe/search?Ntt=impresoras",
+    "sillas-gamer": "https://www.falabella.com.pe/falabella-pe/search?Ntt=sillas+gamer",
+    "camaras": "https://www.falabella.com.pe/falabella-pe/search?Ntt=camaras",
+    "drones": "https://www.falabella.com.pe/falabella-pe/search?Ntt=drones",
+    "asistentes-de-voz": "https://www.falabella.com.pe/falabella-pe/search?Ntt=asistentes+de+voz",
+    "proyectores": "https://www.falabella.com.pe/falabella-pe/search?Ntt=proyectores",
+    # Electrohogar
+    "refrigeradoras": "https://www.falabella.com.pe/falabella-pe/search?Ntt=refrigeradoras",
+    "lavadoras": "https://www.falabella.com.pe/falabella-pe/search?Ntt=lavadoras",
+    "cocinas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=cocinas",
+    "microondas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=microondas",
+    "freidoras-de-aire": "https://www.falabella.com.pe/falabella-pe/search?Ntt=freidoras+de+aire",
+    "cafeteras": "https://www.falabella.com.pe/falabella-pe/search?Ntt=cafeteras",
+    "licuadoras": "https://www.falabella.com.pe/falabella-pe/search?Ntt=licuadoras",
+    "aspiradoras": "https://www.falabella.com.pe/falabella-pe/search?Ntt=aspiradoras",
+    "aire-acondicionado": "https://www.falabella.com.pe/falabella-pe/search?Ntt=aire+acondicionado",
+    "secadores-de-cabello": "https://www.falabella.com.pe/falabella-pe/search?Ntt=secadores+de+cabello",
+    # Muebles y Organización
+    "sofas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=sofas",
+    "comedores": "https://www.falabella.com.pe/falabella-pe/search?Ntt=comedores",
+    "escritorios": "https://www.falabella.com.pe/falabella-pe/search?Ntt=escritorios",
+    "sillas-de-oficina": "https://www.falabella.com.pe/falabella-pe/search?Ntt=sillas+de+oficina",
+    "roperos": "https://www.falabella.com.pe/falabella-pe/search?Ntt=roperos",
+    "zapateras": "https://www.falabella.com.pe/falabella-pe/search?Ntt=zapateras",
+    "racks-de-tv": "https://www.falabella.com.pe/falabella-pe/search?Ntt=racks+de+tv",
+    "muebles-de-terraza": "https://www.falabella.com.pe/falabella-pe/search?Ntt=muebles+de+terraza",
+    # Dormitorio y Baño
+    "colchones": "https://www.falabella.com.pe/falabella-pe/search?Ntt=colchones",
+    "camas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=camas",
+    "sabanas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=sabanas",
+    "edredones": "https://www.falabella.com.pe/falabella-pe/search?Ntt=edredones",
+    "almohadas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=almohadas",
+    # Belleza y Cuidado Personal
+    "perfumes": "https://www.falabella.com.pe/falabella-pe/search?Ntt=perfumes",
+    "maquillaje": "https://www.falabella.com.pe/falabella-pe/search?Ntt=maquillaje",
+    "cuidado-facial": "https://www.falabella.com.pe/falabella-pe/search?Ntt=cuidado+facial",
+    "cuidado-capilar": "https://www.falabella.com.pe/falabella-pe/search?Ntt=cuidado+capilar",
+    # Moda y Calzado
+    "zapatillas-urbanas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=zapatillas+urbanas",
+    "zapatillas-deportivas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=zapatillas+deportivas",
+    "casacas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=casacas",
+    "jeans": "https://www.falabella.com.pe/falabella-pe/search?Ntt=jeans",
+    "polos": "https://www.falabella.com.pe/falabella-pe/search?Ntt=polos",
+    "carteras": "https://www.falabella.com.pe/falabella-pe/search?Ntt=carteras",
+    "relojes": "https://www.falabella.com.pe/falabella-pe/search?Ntt=relojes",
+    # Deportes, Niños y Otros
+    "juguetes": "https://www.falabella.com.pe/falabella-pe/search?Ntt=juguetes",
+    "bicicletas": "https://www.falabella.com.pe/falabella-pe/search?Ntt=bicicletas",
+    "maquinas-de-gimnasio": "https://www.falabella.com.pe/falabella-pe/search?Ntt=maquinas+de+gimnasio",
 }
 
 
@@ -74,9 +126,7 @@ def extract_description_from_html(text):
 
 
 def extract_og_image(text):
-    match = re.search(
-        r'property=["\']og:image["\']\s+content=["\']([^"\']+)', text
-    )
+    match = re.search(r'property=["\']og:image["\']\s+content=["\']([^"\']+)', text)
     return match.group(1) if match else None
 
 
@@ -92,14 +142,14 @@ def download_image(session, image_url, file_name, folder=IMAGES_FOLDER):
 
     path = os.path.join(folder, f"{file_name}.{extension}")
     if os.path.exists(path):
-        return path
+        return os.path.relpath(path, CSV_DIR)
 
     try:
         response = session.get(image_url, timeout=15)
         response.raise_for_status()
         with open(path, "wb") as f:
             f.write(response.content)
-        return path
+        return os.path.relpath(path, CSV_DIR)
     except Exception as e:
         print(f"    Error downloading image: {e}")
         return None
@@ -196,9 +246,7 @@ def collect_listing(seen_links):
 
                 try:
                     page.goto(listing_url, timeout=20000)
-                    page.wait_for_selector(
-                        "xpath=//div[@pod-layout]", timeout=15000
-                    )
+                    page.wait_for_selector("xpath=//div[@pod-layout]", timeout=15000)
                 except Exception as e:
                     print(f"Error on page {page_number}: {e}")
                     continue
@@ -267,7 +315,7 @@ def main():
         kept = set(df["local_image"].dropna())
         for file_name in os.listdir(IMAGES_FOLDER):
             path = os.path.join(IMAGES_FOLDER, file_name)
-            if path not in kept:
+            if os.path.relpath(path, CSV_DIR) not in kept:
                 os.remove(path)
 
     df.to_csv(OUTPUT_CSV_FILE, index=False)
