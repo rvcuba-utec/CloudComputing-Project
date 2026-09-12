@@ -286,7 +286,7 @@ Resources:
   IngestaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: MV de ingesta (contenedores Python -> S3)
+      GroupDescription: MV de ingesta (contenedores Python a S3)
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
