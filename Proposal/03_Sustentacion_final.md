@@ -8,10 +8,10 @@ Documento que consolida lo **implementado** en los microservicios de Catálogo (
 
 CloudShop es un e-commerce con arquitectura de microservicios sobre AWS. Este documento describe el estado final de los dos microservicios operacionales implementados:
 
-- **Catálogo e Inventario** — Go + Gin + MySQL: ~5,100 productos reales (scraping de Falabella), 7 categorías, inventario 1:1, movimientos de stock transaccionales.
+- **Catálogo e Inventario** — Go + Gin + MySQL: 6,497 productos reales (scraping de Falabella), 7 categorías, inventario 1:1, movimientos de stock transaccionales.
 - **Usuarios y Direcciones** — Python + FastAPI + PostgreSQL: 20,000 usuarios con JWT, perfiles y direcciones de envío.
 
-Ambos se alimentan de un pipeline de datos local (scraping + Faker) que ya generó **más de 70,000 registros operacionales** listos para carga, superando con holgura el requisito de 20,000. La analítica (S3, Glue, Athena) consume estos mismos datos vía la MV de ingesta descrita en `02_Sustentacion_Data_Science_CloudShop.md`.
+Ambos se alimentan de un pipeline de datos local (scraping + Faker) que ya generó **más de 78,000 registros operacionales** listos para carga (ver `Backend/DESPLIEGUE.md`), superando con holgura el requisito de 20,000. La analítica (S3, Glue, Athena) consume estos mismos datos vía la MV de ingesta descrita en `02_Sustentacion_Data_Science_CloudShop.md`.
 
 ---
 
@@ -84,7 +84,7 @@ Justificación de cada capa:
 categorias (7 filas reales del scraping)
   id, nombre, descripcion              [UNIQUE(nombre)]
 
-productos (5,112 filas reales)
+productos (6,497 filas reales)
   id, categoria_id → FK categorias     [INDEX]
   sku                                   [UNIQUE]
   nombre (150), descripcion (TEXT)
@@ -105,7 +105,7 @@ movimientos_stock (bitácora)
 
 Decisiones de esquema:
 
-- **`precio` + `precio_oferta`**: el scraping trae 4 precios (CMR, internet, evento, normal). Se consolidan en `precio` = primer precio vigente disponible; `precio_oferta` guarda el "precio tachado" cuando difiere (3,560 productos tienen oferta).
+- **`precio` + `precio_oferta`**: el scraping trae 4 precios (CMR, internet, evento, normal). Se consolidan en `precio` = primer precio vigente disponible; `precio_oferta` guarda el "precio tachado" cuando difiere (5,231 productos tienen oferta).
 - **`activo`**: permite retirar productos del catálogo sin borrarlos (soft delete) y con índice propio porque el listado público siempre filtra `activo = 1`.
 - **`inventario` separado de `productos`**: las escrituras de stock (frecuentes y con `SELECT FOR UPDATE`) no bloquean las lecturas del catálogo.
 - **`movimientos_stock`**: bitácora inmutable que audita cada operación y alimenta la ingesta analítica.
@@ -207,16 +207,16 @@ Dos fuentes con naturalezas distintas — realismo y coherencia:
            │
            ▼
   Data/csv/catalogo/categorias.csv   (7 filas)
-  Data/csv/catalogo/productos.csv    (5,112 filas)
-  Data/csv/catalogo/inventario.csv   (5,112 filas)
+  Data/csv/catalogo/productos.csv    (6,497 filas)
+  Data/csv/catalogo/inventario.csv   (6,497 filas)
 ```
 
 Reglas de transformación de `build_catalogo.py`:
 
 - **Categorías 1:1** con las presentes en el scraping (7 reales): Tecnología, Electrohogar, Muebles, Deportes, Belleza/Higiene/Salud, Hombre, Automotriz.
-- **Precio consolidado**: `COALESCE(cmr, internet, event, normal)`; 1,385 filas sin ningún precio se descartan; `precio_oferta` cuando el precio normal difiere (indica descuento).
+- **Precio consolidado**: `COALESCE(cmr, internet, event, normal)` con parseo robusto (separadores de miles "1,449" y precios múltiples "69.90,99.90" tomando el menor); los 6,497 productos quedan con precio válido. `precio_oferta` cuando el precio normal difiere (indica descuento).
 - **SKU sintético** único (`CAT-000001`+) porque Falabella no expone SKU.
-- **Stock sintético** (no viene en el scraping): 1–500 unidades, ~5% de productos agotados, reservas 0–10. Determinista (seed fija) para resultados reproducibles.
+- **Stock sintético** (no viene en el scraping): 1–500 unidades, ~5% de productos agotados (324), reservas 0–10. Determinista (seed fija) para resultados reproducibles.
 - Los CSVs de usuarios/direcciones llevan `estado='activo'` implícito y `es_principal=true` (relación 1:1 actual), listos para `COPY` en PostgreSQL.
 
 Conteo operacional resultante:
@@ -226,37 +226,55 @@ Conteo operacional resultante:
 | usuarios | 20,000 |
 | direcciones_envio | 20,000 |
 | categorias | 7 |
-| productos | 5,112 |
-| inventario | 5,112 |
+| productos | 6,497 |
+| inventario | 6,497 |
 | movimientos_stock (procedimiento post-carga) | 25,000 |
-| **Total** | **~70,000** |
+| **Total** | **78,001** |
 
-### 5.2 Orden de carga a las bases de datos (VM de datos)
+### 5.2 Carga a las bases de datos (VM de datos)
+
+La carga se realiza con `Data/scripts/src/scripts/load_csv_bd.py`, que reusa las variables del despliegue (`Backend/.env.example`) y limpia las tablas antes de insertar:
 
 ```text
-1. MySQL:  LOAD DATA categorias.csv → categorias
-2. MySQL:  LOAD DATA productos.csv  → productos
-3. MySQL:  LOAD DATA inventario.csv → inventario
-4. MySQL:  CALL poblar_movimientos_stock(25000)   # definido en init.sql
-5. PostgreSQL: COPY usuarios.csv + direcciones_envio.csv
+1. MySQL:   categorias.csv + productos.csv + inventario.csv (inserts por lotes)
+2. MySQL:   CALL poblar_movimientos_stock(25000)
+3. PostgreSQL: usuarios.csv + direcciones_envio.csv (COPY rápido) +
+              reajuste de secuencias SERIAL para que la API inserte sin colisiones
 ```
 
-El esquema (`init.sql`) crea las tablas sin seeds; los datos reales entran por los CSVs.
+El esquema se crea automáticamente al levantar la VM de datos: MySQL monta `products/init.sql` y PostgreSQL monta `postgres-init/01_esquema.sql` (espejo de los modelos SQLAlchemy). Ver `Backend/DESPLIEGUE.md` para el paso a paso completo.
 
 ### 5.3 Ingesta a la nube analítica (sin cambios respecto a 02)
 
 La MV de ingesta ejecuta 3 contenedores Python (pull): extraen de MySQL y PostgreSQL, generan CSVs particionados y los suben a S3; Glue cataloga y Athena consulta. El contrato de datos (`usuario_id`, `producto_id`, `categoria_id` consistentes entre bases) ya está garantizado por este pipeline: los ids de los CSVs se cargan tal cual en las BDs, así que los cruces en Athena funcionan sin traducción.
 
-### 5.4 Comandos de regeneración (`Data/scripts/`)
+### 5.4 Comandos de regeneración y carga (`Data/scripts/`)
 
 ```bash
 uv add faker python-dotenv "passlib[bcrypt]" && uv sync   # dependencias
 uv run python -m scripts.faker_users        # 20k usuarios + direcciones (idempotente)
 uv run python -m scripts.build_catalogo     # products.csv → csv/catalogo/*.csv
+
+# Carga a las BDs (con Data/scripts/.env apuntando a la VM de datos):
+uv run python -m scripts.load_csv_bd --dry-run   # valida CSVs sin conectar
+uv run python -m scripts.load_csv_bd             # carga completa
+
 # Solo para re-scraping (horas de runtime):
 # uv run playwright install chromium
 # uv run python -m scripts.scrapping_falabella
 ```
+
+### 5.5 Despliegue en las VMs de desarrollo
+
+El despliegue completo (VM de datos + VM app + carga de CSVs + verificación) está documentado paso a paso en **`Backend/DESPLIEGUE.md`**. Resumen de piezas:
+
+| Pieza | Archivo |
+|---|---|
+| VM de datos (MySQL + PostgreSQL con esquema inicial) | `Backend/docker-compose.datos.yml` + `Backend/postgres-init/01_esquema.sql` |
+| VM app/dev (los 2 microservicios con healthchecks) | `Backend/docker-compose.yml` |
+| Imágenes Docker | `Backend/products/Dockerfile` (Go multi-stage) · `Backend/users-address/Dockerfile` (Python) |
+| Variables reales (IP privada VM datos, JWT, CORS de Amplify) | `Backend/.env.example` → `.env` (no se versiona) |
+| Carga de datos CSV → BDs | `Data/scripts/src/scripts/load_csv_bd.py` |
 
 ---
 
@@ -322,7 +340,7 @@ Lectura vs. escritura. El catálogo se lee constantemente; el stock se escribe c
 Una transacción por operación: bloqueo de fila (`SELECT ... FOR UPDATE`), verificación de stock, actualización e inserción del movimiento — commit atómico o rollback completo.
 
 **¿Los 20,000 registros son reales o inventados?**
-Ambos: 5,112 productos reales (scraping de Falabella con precios, descripciones e imágenes) y 40,000 registros sintéticos coherentes (usuarios/direcciones Faker con distritos reales de Lima y hashes bcrypt). La mezcla hace la demo creíble y la analítica significativa.
+Ambos: 6,497 productos reales (scraping de Falabella con precios, descripciones e imágenes) y 40,000 registros sintéticos coherentes (usuarios/direcciones Faker con distritos reales de Lima y hashes bcrypt). La mezcla hace la demo creíble y la analítica significativa.
 
 **¿Por qué las categorías son solo 7?**
 Son las categorías presentes en los datos scrapeados; se mapearon 1:1 para no inventar taxonomías que no existen en el dato real. Extenderlas solo requiere re-scraping con el diccionario de categorías del script (ya soporta ~49 consultas).

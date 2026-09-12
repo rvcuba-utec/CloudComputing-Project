@@ -1,0 +1,53 @@
+# VM de datos: MySQL (catálogo) + PostgreSQL (usuarios).
+# Solo debe exponer 3306/5432 hacia la subred privada de la VPC
+# (security groups: nunca abrir estos puertos a 0.0.0.0/0).
+#
+# Uso:
+#   cp .env.example .env && nano .env
+#   docker compose -f docker-compose.datos.yml up -d
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: cloudshop-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Define MYSQL_ROOT_PASSWORD en .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-cloudshop_catalogo}
+      MYSQL_USER: ${MYSQL_USER:-cloud_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Define MYSQL_PASSWORD en .env}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./products/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: cloudshop-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-cloud_user}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?Define PG_PASSWORD en .env}
+      POSTGRES_DB: ${PG_DATABASE:-cloudshop_usuarios}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./postgres-init/01_esquema.sql:/docker-entrypoint-initdb.d/01_esquema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-cloud_user} -d ${PG_DATABASE:-cloudshop_usuarios}"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+
+volumes:
+  mysql_data:
+  pg_data:

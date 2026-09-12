@@ -1,0 +1,46 @@
+# VM de desarrollo/aplicación: los dos microservicios.
+# Las bases de datos NO viven aquí: corren en la VM de datos
+# (Backend/docker-compose.datos.yml) y se alcanzan por IP privada.
+#
+# Uso:
+#   cp .env.example .env && nano .env   # definir IP de la VM de datos, claves, JWT y CORS
+#   docker compose up -d --build
+
+services:
+  catalogo:
+    build: ./products
+    container_name: cloudshop-catalogo
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST: ${MYSQL_HOST:?Define MYSQL_HOST en .env (IP privada de la VM de datos)}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:?Define MYSQL_USER en .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Define MYSQL_PASSWORD en .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-cloudshop_catalogo}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  usuarios:
+    build: ./users-address
+    container_name: cloudshop-usuarios
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Define DATABASE_URL en .env (IP privada de la VM de datos)}
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en .env}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
