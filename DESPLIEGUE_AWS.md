@@ -124,7 +124,7 @@ https://github.com/<tu-usuario>/CloudComputing-Project.git
 Nombre del bucket del data lake. **Debe ser único globalmente**:
 
 ```text
-cloudshop-data-lake-g05-2026
+cloudshop-data-lake-2026-utec-mr-cs2032-20260912
 ```
 
 ### Credenciales

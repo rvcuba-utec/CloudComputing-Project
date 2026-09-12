@@ -20,7 +20,7 @@ POSTGRES_DB = os.environ.get("POSTGRES_DB", "cloudshop_usuarios")  # nombre de l
 POSTGRES_USER = os.environ["POSTGRES_USER"]  # usuario de SOLO LECTURA (ingesta_pg)
 POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
 
-S3_BUCKET = os.environ.get("S3_BUCKET", "cloudshop-data-lake-2026-g05")
+S3_BUCKET = os.environ.get("S3_BUCKET", "cloudshop-data-lake-2026-utec-mr-cs2032-20260912")
 
 # Plantilla: para agregar más tablas -> agregar otra entrada.
 EXTRACCIONES = {

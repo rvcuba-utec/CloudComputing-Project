@@ -71,7 +71,7 @@ Parameters:
     Description: URL pública del repositorio (se clona en cada MV).
   S3BucketName:
     Type: String
-    Default: cloudshop-data-lake-2026-utec-mr
+    Default: cloudshop-data-lake-2026-utec-mr-cs2032-20260912
     Description: Nombre del bucket S3 del data lake (debe ser único globalmente).
   MySqlDatabase:
     Type: String
@@ -338,7 +338,9 @@ Resources:
               set -e
               exec > /var/log/userdata.log 2>&1
               apt-get update -y
-              apt-get install -y docker.io docker-compose-plugin git
+              apt-get install -y git curl ca-certificates
+              curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+              sh /tmp/get-docker.sh
               systemctl enable --now docker
               usermod -aG docker ubuntu
               git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
@@ -395,7 +397,9 @@ Resources:
               set -e
               exec > /var/log/userdata.log 2>&1
               apt-get update -y
-              apt-get install -y docker.io docker-compose-plugin git
+              apt-get install -y git curl ca-certificates
+              curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+              sh /tmp/get-docker.sh
               systemctl enable --now docker
               usermod -aG docker ubuntu
               git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
@@ -451,10 +455,17 @@ Resources:
             set -e
             exec > /var/log/userdata.log 2>&1
             apt-get update -y
-            apt-get install -y docker.io docker-compose-plugin git
+            apt-get install -y git curl ca-certificates
+            curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+            sh /tmp/get-docker.sh
             systemctl enable --now docker
             usermod -aG docker ubuntu
             git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
+            # Las contrasenas de los usuarios de solo lectura de ingesta son
+            # parametros del stack: se inyectan en los scripts de init de las BD
+            # para que coincidan con el .env que se genera en la MV de ingesta.
+            sed -i "s|ingesta_my_readonly|${IngestaMyPassword}|g" /home/ubuntu/cloudshop/Backend/products/init.sql
+            sed -i "s|ingesta_pg_readonly|${IngestaPgPassword}|g" /home/ubuntu/cloudshop/Backend/postgres-init/01_esquema.sql
             cat > /home/ubuntu/cloudshop/Backend/.env <<'EOF'
             MYSQL_DATABASE=${MySqlDatabase}
             MYSQL_USER=${MySqlUser}
@@ -493,7 +504,9 @@ Resources:
               set -e
               exec > /var/log/userdata.log 2>&1
               apt-get update -y
-              apt-get install -y docker.io docker-compose-plugin git
+              apt-get install -y git curl ca-certificates
+              curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+              sh /tmp/get-docker.sh
               systemctl enable --now docker
               usermod -aG docker ubuntu
               git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
