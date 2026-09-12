@@ -1,0 +1,209 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CloudShop: dos MVs de aplicacion, una MV de base de datos y una MV de
+  ingesta. La MV de datos solo acepta MySQL/PostgreSQL desde los SG autorizados.
+
+Parameters:
+  InstanceNamePrefix:
+    Type: String
+    Default: "CloudShop"
+    Description: Prefijo usado en los nombres de las instancias.
+
+  AMI:
+    Type: String
+    Default: "ami-0b33d2f1547e52c78"
+    Description: AMI Cloud9Ubuntu22 usada en los talleres.
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: "vockey"
+    Description: Par de claves de AWS Academy.
+
+  InstanceType:
+    Type: String
+    Default: "t2.micro"
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+      - t3.medium
+    Description: Tipo de instancia para las cuatro MVs.
+
+  AdminCidr:
+    Type: String
+    Default: "0.0.0.0/0"
+    Description: CIDR autorizado para SSH y Adminer. En una demo se puede usar 0.0.0.0/0, pero es mejor usar TU_IP/32.
+
+  AppTestCidr:
+    Type: String
+    Default: "0.0.0.0/0"
+    Description: CIDR temporal para probar las APIs directamente. En produccion se reemplaza por el SG del NLB.
+
+Resources:
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG compartido por las dos MVs de aplicacion.
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: !Ref AppTestCidr
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref AppTestCidr
+      Tags:
+        - Key: Name
+          Value: !Sub "${InstanceNamePrefix}-sg-app"
+
+  IngestaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG de la MV que extrae datos hacia S3.
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AdminCidr
+      Tags:
+        - Key: Name
+          Value: !Sub "${InstanceNamePrefix}-sg-ingesta"
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG de BD. Solo app e ingesta acceden a MySQL/PostgreSQL.
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref AdminCidr
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref AppSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref IngestaSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AppSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref IngestaSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${InstanceNamePrefix}-sg-bd"
+
+  AppInstance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref AppSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+      Tags:
+        - Key: Name
+          Value: !Sub "${InstanceNamePrefix}-app-1"
+
+  AppInstance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref AppSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+      Tags:
+        - Key: Name
+          Value: !Sub "${InstanceNamePrefix}-app-2"
+
+  DatabaseInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref DatabaseSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 30
+      Tags:
+        - Key: Name
+          Value: !Sub "${InstanceNamePrefix}-bd"
+
+  IngestaInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref IngestaSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+      Tags:
+        - Key: Name
+          Value: !Sub "${InstanceNamePrefix}-ingesta"
+
+Outputs:
+  App1InstanceId:
+    Value: !Ref AppInstance1
+  App1PublicIP:
+    Value: !GetAtt AppInstance1.PublicIp
+  App1PrivateIP:
+    Value: !GetAtt AppInstance1.PrivateIp
+
+  App2InstanceId:
+    Value: !Ref AppInstance2
+  App2PublicIP:
+    Value: !GetAtt AppInstance2.PublicIp
+  App2PrivateIP:
+    Value: !GetAtt AppInstance2.PrivateIp
+
+  DatabaseInstanceId:
+    Value: !Ref DatabaseInstance
+  DatabasePublicIP:
+    Value: !GetAtt DatabaseInstance.PublicIp
+  DatabasePrivateIP:
+    Description: Usar esta IP en DATABASE_URL y MYSQL_HOST.
+    Value: !GetAtt DatabaseInstance.PrivateIp
+
+  IngestaInstanceId:
+    Value: !Ref IngestaInstance
+  IngestaPublicIP:
+    Value: !GetAtt IngestaInstance.PublicIp
+  IngestaPrivateIP:
+    Value: !GetAtt IngestaInstance.PrivateIp
+
+  AppSecurityGroupId:
+    Value: !Ref AppSecurityGroup
+  IngestaSecurityGroupId:
+    Value: !Ref IngestaSecurityGroup
+  DatabaseSecurityGroupId:
+    Value: !Ref DatabaseSecurityGroup

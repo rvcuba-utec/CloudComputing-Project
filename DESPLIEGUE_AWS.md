@@ -278,7 +278,7 @@ Debes ver `mysql_c` y `postgres_c` en estado `Up`.
 
 ```bash
 docker exec -i mysql_c mysql -uroot -putec -e "
-CREATE USER IF NOT EXISTS 'cloud_user'@'%' IDENTIFIED BY 'CLAVE_SEGURA';
+CREATE USER IF NOT EXISTS 'cloud_user'@'%' IDENTIFIED BY 'cloudshop123';
 GRANT ALL PRIVILEGES ON cloudshop_catalogo.* TO 'cloud_user'@'%';
 FLUSH PRIVILEGES;"
 ```
@@ -286,7 +286,7 @@ FLUSH PRIVILEGES;"
 ### 4.7 Crear el usuario y la base en PostgreSQL
 
 ```bash
-docker exec -i postgres_c psql -U postgres -c "CREATE USER usuarios_app WITH PASSWORD 'CLAVE_SEGURA';"
+docker exec -i postgres_c psql -U postgres -c "CREATE USER usuarios_app WITH PASSWORD 'cloudshop123';"
 docker exec -i postgres_c psql -U postgres -c "CREATE DATABASE cloudshop_usuarios OWNER usuarios_app;"
 ```
 
