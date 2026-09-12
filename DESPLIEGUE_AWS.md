@@ -42,7 +42,7 @@ La plantilla `infrastructure/cloudformation.yaml` crea todo de una sola vez:
    | `KeyName` | `vockey` (el Key Pair del Learner Lab) |
    | `AmiId` | Dejar el valor por defecto (Ubuntu 22.04) |
    | `RepoUrl` | URL pública de tu repo en GitHub |
-   | `S3BucketName` | `cloudshop-data-lake-2026-utec-mr-cs2032-20260912` |
+   | `S3BucketName` | `cloudshop-data-lake-2026-utec-mr-cs2032-v2` |
    | `MySqlPassword` / `MySqlRootPassword` | Claves que tú elijas |
    | `PostgresPassword` | Clave que tú elijas |
    | `JwtSecret` | String largo y aleatorio |
@@ -204,13 +204,13 @@ cd /home/ubuntu/cloudshop/Ingesta
 docker compose up --build
 ```
 
-Verifica el bucket S3 desde la consola: ve a **S3 → cloudshop-data-lake-2026-utec-mr-cs2032-20260912**
+Verifica el bucket S3 desde la consola: ve a **S3 → cloudshop-data-lake-2026-utec-mr-cs2032-v2**
 y confirma que existen las carpetas `catalogo/` y `usuarios/` con los CSV.
 
 O desde la misma terminal de Ingesta (el IAM Role del Lab ya tiene acceso):
 
 ```bash
-aws s3 ls s3://cloudshop-data-lake-2026-utec-mr-cs2032-20260912/ --recursive
+aws s3 ls s3://cloudshop-data-lake-2026-utec-mr-cs2032-v2/ --recursive
 ```
 
 Estructura esperada:

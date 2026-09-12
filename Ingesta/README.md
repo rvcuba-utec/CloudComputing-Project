@@ -20,7 +20,7 @@ usa las credenciales de AWS del IAM Role de la EC2 (nunca claves en el código).
 ## Estructura del bucket S3
 
 ```text
-s3://cloudshop-data-lake-2026-utec-mr-cs2032-20260912/
+s3://cloudshop-data-lake-2026-utec-mr-cs2032-v2/
 ├── usuarios/
 │   ├── usuarios.csv
 │   └── direcciones_envio.csv
@@ -64,7 +64,7 @@ de filas extraídas por tabla y el destino `s3://...` de cada archivo.
 
 ```bash
 docker compose logs        # filas extraídas por tabla y estado OK
-aws s3 ls s3://cloudshop-data-lake-2026-utec-mr-cs2032-20260912/ --recursive
+aws s3 ls s3://cloudshop-data-lake-2026-utec-mr-cs2032-v2/ --recursive
 ```
 
 La analítica posterior (Glue → Athena → Microservicio analítico) consume estos archivos.

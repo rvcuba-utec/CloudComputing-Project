@@ -21,7 +21,7 @@ MYSQL_DB = os.environ.get("MYSQL_DB", "cloudshop_catalogo")
 MYSQL_USER = os.environ["MYSQL_USER"]  # usuario de SOLO LECTURA (ingesta_my)
 MYSQL_PASSWORD = os.environ["MYSQL_PASSWORD"]
 
-S3_BUCKET = os.environ.get("S3_BUCKET", "cloudshop-data-lake-2026-utec-mr-cs2032-20260912")
+S3_BUCKET = os.environ.get("S3_BUCKET", "cloudshop-data-lake-2026-utec-mr-cs2032-v2")
 
 # Plantilla: para agregar más tablas -> agregar otra entrada.
 EXTRACCIONES = {
