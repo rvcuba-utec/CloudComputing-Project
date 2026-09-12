@@ -20,6 +20,16 @@ Data/                     Pipeline de datos
     ├── build_catalogo.py        → transforma scraping → CSVs del catálogo
     └── load_csv_bd.py           → carga CSVs en MySQL/PostgreSQL
 
+Frontend/                 SPA React (Vite) desplegada en AWS Amplify
+
+Ingesta/                  MV de ingesta (contenedores Python → S3)
+├── ingesta-usuarios/     PostgreSQL → usuarios.csv, direcciones_envio.csv
+├── ingesta-catalogo/     MySQL → categorias, productos, inventario, movimientos_stock
+└── docker-compose.yml    orquesta los contenedores de ingesta
+
+infrastructure/           Infraestructura como código (CloudFormation)
+└── cloudformation.yaml   VPC, subredes, Security Groups, 4 MV, S3, IAM
+
 Proposal/                 Documentos de sustentación
 ├── 03_Sustentacion_final.md   ← documento principal (backend + datos)
 ├── 02_Sustentacion_Data_Science_CloudShop.md
@@ -38,15 +48,22 @@ Proposal/                 Documentos de sustentación
 - 25,000 movimientos de stock (procedimiento almacenado)
 - **Total: ~76,000 registros operacionales**
 
+**Infraestructura (primer entregable):**
+- `infrastructure/cloudformation.yaml` despliega la VPC, los Security Groups (app, base de datos privada, ingesta), las 4 MV (2 de aplicación + datos + ingesta), el bucket S3 y el IAM Role de ingesta.
+- `Ingesta/` contiene los contenedores Python que extraen el 100 % de los registros y los cargan en S3 (usuarios + catálogo).
+- Guía paso a paso: `DESPLIEGUE_AWS.md`.
+
 **Pendiente:**
-- Microservicio de Reseñas (Node.js + MongoDB)
+- Microservicio de Reseñas (Node.js + MongoDB) y su contenedor `ingesta-ventas`
 - Microservicio de Órdenes (orquestador)
-- MV de ingesta (contenedores Python → S3 → Glue → Athena)
+- Glue (catálogo de datos) + Athena (consultas y vistas) + Microservicio analítico
+- API Gateway + NLB privado + segunda MV de producción
 - Frontend en AWS Amplify
 
 ## Quickstart
 
-Ver `Backend/DESPLIEGUE.md` para el despliegue completo en VMs de AWS.
+Despliegue completo en AWS: ver `DESPLIEGUE_AWS.md` (CloudFormation).
+Despliegue manual de las VMs: ver `Backend/DESPLIEGUE.md`.
 
 Para regenerar los datos:
 ```bash
@@ -60,5 +77,8 @@ uv run python -m scripts.load_csv_bd --dry-run  # validar
 ## Documentación
 
 - **Sustentación final**: `Proposal/03_Sustentacion_final.md`
-- **Despliegue**: `Backend/DESPLIEGUE.md`
+- **Despliegue en AWS (paso a paso)**: `DESPLIEGUE_AWS.md`
+- **Despliegue manual de VMs**: `Backend/DESPLIEGUE.md`
+- **Ingesta**: `Ingesta/README.md`
 - **Scripts de datos**: `Data/scripts/README.md`
+- **Frontend**: `Frontend/README.md`

@@ -1,0 +1,28 @@
+# MV de ingesta: contenedores Python que extraen el 100% de los registros de
+# cada base operacional y cargan archivos CSV/JSON en el bucket S3.
+#
+# Cada contenedor se conecta a UNA fuente con credenciales de SOLO LECTURA.
+# boto3 toma las credenciales de AWS del IAM Role asociado a la EC2 (no se
+# guardan claves en el repositorio).
+#
+# Uso (en la MV de ingesta):
+#   cp ingesta-usuarios/.env.example ingesta-usuarios/.env
+#   cp ingesta-catalogo/.env.example ingesta-catalogo/.env
+#   nano ingesta-usuarios/.env    # POSTGRES_HOST = IP privada de la MV de datos
+#   nano ingesta-catalogo/.env    # MYSQL_HOST   = IP privada de la MV de datos
+#   docker compose up --build     # ejecuta ambos contenedores una vez y termina
+
+services:
+  ingesta-usuarios:
+    build: ./ingesta-usuarios
+    container_name: cloudshop-ingesta-usuarios
+    env_file:
+      - ./ingesta-usuarios/.env
+    restart: "no"
+
+  ingesta-catalogo:
+    build: ./ingesta-catalogo
+    container_name: cloudshop-ingesta-catalogo
+    env_file:
+      - ./ingesta-catalogo/.env
+    restart: "no"

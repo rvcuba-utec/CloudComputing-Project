@@ -26,3 +26,12 @@ CREATE TABLE IF NOT EXISTS direcciones_envio (
 );
 
 CREATE INDEX IF NOT EXISTS ix_direcciones_envio_usuario_id ON direcciones_envio (usuario_id);
+
+-- Usuario de SOLO LECTURA para la MV de ingesta.
+-- La contraseña es un valor de ejemplo; si se cambia, mantener sincronizada con
+-- Ingesta/ingesta-usuarios/.env (POSTGRES_USER / POSTGRES_PASSWORD).
+CREATE USER ingesta_pg WITH PASSWORD 'ingesta_pg_readonly';
+GRANT CONNECT ON DATABASE cloudshop_usuarios TO ingesta_pg;
+GRANT USAGE ON SCHEMA public TO ingesta_pg;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO ingesta_pg;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ingesta_pg;

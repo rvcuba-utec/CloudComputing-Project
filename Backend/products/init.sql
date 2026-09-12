@@ -96,3 +96,10 @@ BEGIN
 END $$
 
 DELIMITER ;
+
+-- Usuario de SOLO LECTURA para la MV de ingesta.
+-- La contraseña es un valor de ejemplo; si se cambia, mantener sincronizada con
+-- Ingesta/ingesta-catalogo/.env (MYSQL_USER / MYSQL_PASSWORD).
+CREATE USER IF NOT EXISTS 'ingesta_my'@'%' IDENTIFIED BY 'ingesta_my_readonly';
+GRANT SELECT ON cloudshop_catalogo.* TO 'ingesta_my'@'%';
+FLUSH PRIVILEGES;

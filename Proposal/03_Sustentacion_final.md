@@ -11,7 +11,7 @@ CloudShop es un e-commerce con arquitectura de microservicios sobre AWS. Este do
 - **Catálogo e Inventario** — Go + Gin + MySQL: 5,699 productos reales (scraping de Falabella), 50 categorías, inventario 1:1, movimientos de stock transaccionales.
 - **Usuarios y Direcciones** — Python + FastAPI + PostgreSQL: 20,000 usuarios con JWT, perfiles y direcciones de envío.
 
-Ambos se alimentan de un pipeline de datos local (scraping + Faker) que ya generó **más de 78,000 registros operacionales** listos para carga (ver `Backend/DESPLIEGUE.md`), superando con holgura el requisito de 20,000. La analítica (S3, Glue, Athena) consume estos mismos datos vía la MV de ingesta descrita en `02_Sustentacion_Data_Science_CloudShop.md`.
+Ambos se alimentan de un pipeline de datos local (scraping + Faker) que ya generó **más de 78,000 registros operacionales** listos para carga (ver `Backend/DESPLIEGUE.md`), superando con holgura el requisito de 20,000. La analítica (S3, Glue, Athena) consume estos mismos datos vía la **MV de ingesta** (`Ingesta/`), ya implementada para usuarios y catálogo. Todo el entorno (VPC, seguridad, las 4 MV, S3 e IAM) se despliega como código con **CloudFormation** (`infrastructure/cloudformation.yaml`); el paso a paso está en `DESPLIEGUE_AWS.md`.
 
 ---
 
@@ -244,9 +244,15 @@ La carga se realiza con `Data/scripts/src/scripts/load_csv_bd.py`, que reusa las
 
 El esquema se crea automáticamente al levantar la VM de datos: MySQL monta `products/init.sql` y PostgreSQL monta `postgres-init/01_esquema.sql` (espejo de los modelos SQLAlchemy). Ver `Backend/DESPLIEGUE.md` para el paso a paso completo.
 
-### 5.3 Ingesta a la nube analítica (sin cambios respecto a 02)
+### 5.3 Ingesta a la nube analítica (implementada en `Ingesta/`)
 
-La MV de ingesta ejecuta 3 contenedores Python (pull): extraen de MySQL y PostgreSQL, generan CSVs particionados y los suben a S3; Glue cataloga y Athena consulta. El contrato de datos (`usuario_id`, `producto_id`, `categoria_id` consistentes entre bases) ya está garantizado por este pipeline: los ids de los CSVs se cargan tal cual en las BDs, así que los cruces en Athena funcionan sin traducción.
+La MV de ingesta ejecuta contenedores Python (estrategia pull del 100 %): extraen de MySQL y PostgreSQL, generan CSVs y los suben a S3; Glue cataloga y Athena consulta. En este entregable están implementados dos de los tres contenedores, uno por cada backend:
+
+- `ingesta-usuarios` → PostgreSQL: `usuarios`, `direcciones_envio`.
+- `ingesta-catalogo` → MySQL: `categorias`, `productos`, `inventario`, `movimientos_stock`.
+- `ingesta-ventas` (MongoDB) llega con el microservicio de Ventas/Reseñas.
+
+Cada contenedor se conecta con credenciales de **solo lectura** (`ingesta_pg` / `ingesta_my`, creadas en el primer arranque de las bases) y usa las credenciales de AWS del IAM Role de la EC2 (sin claves en el código). El contrato de datos (`usuario_id`, `producto_id`, `categoria_id` consistentes entre bases) ya está garantizado por este pipeline: los ids de los CSVs se cargan tal cual en las BDs, así que los cruces en Athena funcionan sin traducción.
 
 ### 5.4 Comandos de regeneración y carga (`Data/scripts/`)
 
@@ -275,6 +281,27 @@ El despliegue completo (VM de datos + VM app + carga de CSVs + verificación) es
 | Imágenes Docker | `Backend/products/Dockerfile` (Go multi-stage) · `Backend/users-address/Dockerfile` (Python) |
 | Variables reales (IP privada VM datos, JWT, CORS de Amplify) | `Backend/.env.example` → `.env` (no se versiona) |
 | Carga de datos CSV → BDs | `Data/scripts/src/scripts/load_csv_bd.py` |
+
+### 5.6 Infraestructura como código (CloudFormation)
+
+El primer entregable se despliega con **AWS CloudFormation** desde un único template
+(`infrastructure/cloudformation.yaml`) que crea todo el entorno en una operación:
+
+| Pieza | Detalle |
+|---|---|
+| VPC + subredes | Subred pública (MV app + MV ingesta) y subred **privada** (MV de datos) con NAT Gateway |
+| Security Groups | `sg-app`, `sg-ingesta` y `sg-bd`; la base solo acepta 3306/5432 desde `sg-app` y `sg-ingesta` (nunca `0.0.0.0/0`) |
+| 2 MV de aplicación (App 1 y App 2) | EC2 públicas que instalan Docker, clonan el repo y levantan `docker-compose.yml` (catálogo + usuarios), compartiendo `sg-app` |
+| MV de base de datos | EC2 **privada** (sin IP pública) con MySQL + PostgreSQL (`docker-compose.datos.yml`) |
+| MV de ingesta | EC2 con IAM Role que prepara los contenedores Python y escribe en S3 |
+| S3 | Bucket del data lake |
+| IAM | Rol de ingesta con permisos de escritura solo en el bucket |
+
+La elección de un **único template** (en lugar de varios anidados) se justifica en este
+entregable por simplicidad: un solo `create-stack` despliega VPC, seguridad, las 4 MV
+(2 de aplicación + datos + ingesta), S3 e IAM de forma atómica y reproducible; al crecer a producción puede partirse en
+stacks anidados (red, datos, aplicación, analítica). El paso a paso completo está en
+**`DESPLIEGUE_AWS.md`**.
 
 ---
 
@@ -325,6 +352,9 @@ El despliegue completo (VM de datos + VM app + carga de CSVs + verificación) es
 | 4 | **Migraciones versionadas** | Reemplazar `Base.metadata.create_all` y el `init.sql` manual por Alembic (Python) y golang-migrate (Go): evolución del esquema sin reprovisionar la VM. |
 | 5 | **Frontend en Amplify** | SPA React: catálogo con filtros/paginación, detalle con imagen real, checkout consumiendo el flujo reservar→confirmar. |
 | 6 | **CI/CD y observabilidad** | Pipeline de build de imágenes, métricas de p99 y error rate por endpoint, alertas sobre el health check. |
+| 7 | **Catálogo Glue + Athena + Microservicio analítico** | Registrar cada CSV de S3 en Glue, crear las 4 consultas y 2 vistas en Athena y exponer el MS5 (FastAPI) que el frontend consume. |
+| 8 | **`ingesta-ventas` (MongoDB)** | Tercer contenedor de ingesta: `ordenes`, `resenas` y `detalle_ordenes.csv`; llega junto al microservicio de Ventas/Reseñas. |
+| 9 | **API Gateway + NLB privado** | Reemplazar el acceso directo por HTTPS público vía API Gateway → NLB privado → las 2 MV de aplicación idénticas. |
 
 ---
 

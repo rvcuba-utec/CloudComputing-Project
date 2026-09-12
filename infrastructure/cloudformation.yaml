@@ -1,0 +1,551 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudShop - Infraestructura del primer entregable. Crea la VPC, los Security
+  Groups (desarrollo, base de datos, ingesta), las 4 MV (2 de aplicación, datos
+  e ingesta), el bucket S3 del data lake y el IAM Role de ingesta. Las bases de
+  datos quedan en una subred privada (sin IP pública).
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Acceso y región
+        Parameters: [KeyName, AmiId, SshCidr]
+      - Label:
+          default: Red (VPC)
+        Parameters: [VpcCidr, PublicSubnetCidr, PrivateSubnetCidr]
+      - Label:
+          default: Instancias EC2
+        Parameters: [InstanceTypeApp, InstanceTypeData, InstanceTypeIngesta]
+      - Label:
+          default: Repositorio y datos
+        Parameters: [RepoUrl, S3BucketName, MySqlDatabase, PostgresDatabase, CorsOrigins]
+      - Label:
+          default: Credenciales (no se versionan)
+        Parameters: [MySqlUser, MySqlPassword, MySqlRootPassword, PostgresUser, PostgresPassword, JwtSecret, IngestaMyPassword, IngestaPgPassword]
+
+Parameters:
+  # --- Acceso ---------------------------------------------------------------
+  KeyName:
+    Type: String
+    Description: Par de llaves SSH (EC2 Key Pair) existente en la región.
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-ssd/ami-id
+    Description: AMI de Ubuntu 22.04 (por defecto, la oficial vía SSM).
+  SshCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR autorizado para SSH (ajústalo a tu IP pública).
+
+  # --- Red ------------------------------------------------------------------
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.0.1.0/24
+  PrivateSubnetCidr:
+    Type: String
+    Default: 10.0.2.0/24
+
+  # --- Instancias -----------------------------------------------------------
+  InstanceTypeApp:
+    Type: String
+    Default: t3.micro
+    Description: Tipo de instancia para la MV de aplicación/desarrollo.
+  InstanceTypeData:
+    Type: String
+    Default: t3.micro
+    Description: Tipo de instancia para la MV de base de datos.
+  InstanceTypeIngesta:
+    Type: String
+    Default: t3.micro
+    Description: Tipo de instancia para la MV de ingesta.
+
+  # --- Repositorio y datos --------------------------------------------------
+  RepoUrl:
+    Type: String
+    Default: https://github.com/GRUPO/CloudComputing-Project.git
+    Description: URL pública del repositorio (se clona en cada MV).
+  S3BucketName:
+    Type: String
+    Default: cloudshop-data-lake-2026-g05
+    Description: Nombre del bucket S3 del data lake (debe ser único globalmente).
+  MySqlDatabase:
+    Type: String
+    Default: cloudshop_catalogo
+  PostgresDatabase:
+    Type: String
+    Default: cloudshop_usuarios
+  CorsOrigins:
+    Type: String
+    Default: http://localhost:5173
+    Description: Orígenes CORS permitidos (separados por coma).
+
+  # --- Credenciales (NoEcho) ------------------------------------------------
+  MySqlUser:
+    Type: String
+    Default: cloud_user
+  MySqlPassword:
+    Type: String
+    NoEcho: true
+    Default: cloud_pass
+  MySqlRootPassword:
+    Type: String
+    NoEcho: true
+    Default: cloud_root_pass
+  PostgresUser:
+    Type: String
+    Default: cloud_user
+  PostgresPassword:
+    Type: String
+    NoEcho: true
+    Default: cloud_pass
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Default: cambia_esto_por_un_string_largo_y_aleatorio
+  IngestaMyPassword:
+    Type: String
+    NoEcho: true
+    Default: ingesta_my_readonly
+    Description: Contraseña del usuario de solo lectura 'ingesta_my' (MySQL).
+  IngestaPgPassword:
+    Type: String
+    NoEcho: true
+    Default: ingesta_pg_readonly
+    Description: Contraseña del usuario de solo lectura 'ingesta_pg' (PostgreSQL).
+
+Resources:
+  # =========================================================================
+  # VPC y subredes
+  # =========================================================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-igw'
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-subnet-publica'
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-subnet-privada'
+
+  # Salida a internet para la subred privada (solo outbound, vía NAT).
+  NatEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnet
+    DependsOn: VpcGatewayAttachment
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rt-publica'
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rt-privada'
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NatGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  # =========================================================================
+  # Security Groups
+  # =========================================================================
+  # MV de aplicación/desarrollo: expone 8080 (catálogo) y 8000 (usuarios) para
+  # desarrollo; en producción estos puertos quedarán detrás del API Gateway + NLB.
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: MV de aplicación/desarrollo (catálogo + usuarios)
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SshCidr
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-sg-app'
+
+  # MV de base de datos: PRIVADA. 3306/5432 solo desde las MV de aplicación e
+  # ingesta (por ID de security group, nunca 0.0.0.0/0).
+  DataSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: MV de base de datos (MySQL + PostgreSQL) - acceso privado
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SshCidr
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref AppSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AppSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref IngestaSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref IngestaSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-sg-bd'
+
+  # MV de ingesta: lee las bases (solo lectura) y escribe en S3.
+  IngestaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: MV de ingesta (contenedores Python -> S3)
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SshCidr
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-sg-ingesta'
+
+  # =========================================================================
+  # S3 (data lake) + IAM Role de ingesta
+  # =========================================================================
+  DataLakeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-datalake'
+
+  IngestaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: IngestaS3Write
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3BucketName}'
+                  - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rol-ingesta'
+
+  IngestaInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref IngestaRole
+
+  # =========================================================================
+  # Instancias EC2
+  # =========================================================================
+  AppInstance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceTypeApp
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref AppSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mv-app-1'
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              set -e
+              exec > /var/log/userdata.log 2>&1
+              apt-get update -y
+              apt-get install -y docker.io docker-compose-plugin git
+              systemctl enable --now docker
+              usermod -aG docker ubuntu
+              git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
+              cat > /home/ubuntu/cloudshop/Backend/.env <<'EOF'
+              MYSQL_HOST=${DataPrivateIp}
+              MYSQL_PORT=3306
+              MYSQL_DATABASE=${MySqlDatabase}
+              MYSQL_USER=${MySqlUser}
+              MYSQL_PASSWORD=${MySqlPassword}
+              MYSQL_ROOT_PASSWORD=${MySqlRootPassword}
+              PG_USER=${PostgresUser}
+              PG_PASSWORD=${PostgresPassword}
+              PG_DATABASE=${PostgresDatabase}
+              DATABASE_URL=postgresql+psycopg2://${PostgresUser}:${PostgresPassword}@${DataPrivateIp}:5432/${PostgresDatabase}
+              JWT_SECRET=${JwtSecret}
+              JWT_ALGORITHM=HS256
+              JWT_EXPIRE_MINUTES=60
+              CORS_ORIGINS=${CorsOrigins}
+              EOF
+              cd /home/ubuntu/cloudshop/Backend
+              docker compose up -d --build
+            - DataPrivateIp: !GetAtt DataInstance.PrivateIp
+
+  AppInstance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceTypeApp
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref AppSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mv-app-2'
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              set -e
+              exec > /var/log/userdata.log 2>&1
+              apt-get update -y
+              apt-get install -y docker.io docker-compose-plugin git
+              systemctl enable --now docker
+              usermod -aG docker ubuntu
+              git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
+              cat > /home/ubuntu/cloudshop/Backend/.env <<'EOF'
+              MYSQL_HOST=${DataPrivateIp}
+              MYSQL_PORT=3306
+              MYSQL_DATABASE=${MySqlDatabase}
+              MYSQL_USER=${MySqlUser}
+              MYSQL_PASSWORD=${MySqlPassword}
+              MYSQL_ROOT_PASSWORD=${MySqlRootPassword}
+              PG_USER=${PostgresUser}
+              PG_PASSWORD=${PostgresPassword}
+              PG_DATABASE=${PostgresDatabase}
+              DATABASE_URL=postgresql+psycopg2://${PostgresUser}:${PostgresPassword}@${DataPrivateIp}:5432/${PostgresDatabase}
+              JWT_SECRET=${JwtSecret}
+              JWT_ALGORITHM=HS256
+              JWT_EXPIRE_MINUTES=60
+              CORS_ORIGINS=${CorsOrigins}
+              EOF
+              cd /home/ubuntu/cloudshop/Backend
+              docker compose up -d --build
+            - DataPrivateIp: !GetAtt DataInstance.PrivateIp
+
+  DataInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceTypeData
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref DataSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mv-base-de-datos'
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              set -e
+              exec > /var/log/userdata.log 2>&1
+              apt-get update -y
+              apt-get install -y docker.io docker-compose-plugin git
+              systemctl enable --now docker
+              usermod -aG docker ubuntu
+              git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
+              cat > /home/ubuntu/cloudshop/Backend/.env <<'EOF'
+              MYSQL_DATABASE=${MySqlDatabase}
+              MYSQL_USER=${MySqlUser}
+              MYSQL_PASSWORD=${MySqlPassword}
+              MYSQL_ROOT_PASSWORD=${MySqlRootPassword}
+              PG_USER=${PostgresUser}
+              PG_PASSWORD=${PostgresPassword}
+              PG_DATABASE=${PostgresDatabase}
+              EOF
+              cd /home/ubuntu/cloudshop/Backend
+              docker compose -f docker-compose.datos.yml up -d
+
+  IngestaInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceTypeIngesta
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref IngestaSecurityGroup
+      IamInstanceProfile: !Ref IngestaInstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-mv-ingesta'
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              set -e
+              exec > /var/log/userdata.log 2>&1
+              apt-get update -y
+              apt-get install -y docker.io docker-compose-plugin git
+              systemctl enable --now docker
+              usermod -aG docker ubuntu
+              git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
+              cat > /home/ubuntu/cloudshop/Ingesta/ingesta-usuarios/.env <<'EOF'
+              POSTGRES_HOST=${DataPrivateIp}
+              POSTGRES_PORT=5432
+              POSTGRES_DB=${PostgresDatabase}
+              POSTGRES_USER=ingesta_pg
+              POSTGRES_PASSWORD=${IngestaPgPassword}
+              S3_BUCKET=${S3BucketName}
+              EOF
+              cat > /home/ubuntu/cloudshop/Ingesta/ingesta-catalogo/.env <<'EOF'
+              MYSQL_HOST=${DataPrivateIp}
+              MYSQL_PORT=3306
+              MYSQL_DB=${MySqlDatabase}
+              MYSQL_USER=ingesta_my
+              MYSQL_PASSWORD=${IngestaMyPassword}
+              S3_BUCKET=${S3BucketName}
+              EOF
+            - DataPrivateIp: !GetAtt DataInstance.PrivateIp
+
+Outputs:
+  VpcId:
+    Description: ID de la VPC creada
+    Value: !Ref VPC
+  App1PublicIp:
+    Description: IP pública de la MV de aplicación 1
+    Value: !GetAtt AppInstance1.PublicIp
+  App2PublicIp:
+    Description: IP pública de la MV de aplicación 2
+    Value: !GetAtt AppInstance2.PublicIp
+  DataPrivateIp:
+    Description: IP privada de la MV de base de datos
+    Value: !GetAtt DataInstance.PrivateIp
+  IngestaPublicIp:
+    Description: IP pública de la MV de ingesta
+    Value: !GetAtt IngestaInstance.PublicIp
+  S3BucketName:
+    Description: Bucket S3 del data lake
+    Value: !Ref DataLakeBucket

@@ -6,31 +6,34 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import boto3
-import psycopg2
+import pymysql
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
-log = logging.getLogger("ingesta-usuarios")
+log = logging.getLogger("ingesta-catalogo")
 
-POSTGRES_HOST = os.environ["POSTGRES_HOST"]  # IP privada de la MV de bases de datos
-POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5432")
-POSTGRES_DB = os.environ.get("POSTGRES_DB", "cloudshop_usuarios")  # nombre de la base
-POSTGRES_USER = os.environ["POSTGRES_USER"]  # usuario de SOLO LECTURA (ingesta_pg)
-POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
+# IP privada de la MV de base de datos (PostgreSQL/MySQL).
+MYSQL_HOST = os.environ["MYSQL_HOST"]
+MYSQL_PORT = int(os.environ.get("MYSQL_PORT", "3306"))
+MYSQL_DB = os.environ.get("MYSQL_DB", "cloudshop_catalogo")
+MYSQL_USER = os.environ["MYSQL_USER"]  # usuario de SOLO LECTURA (ingesta_my)
+MYSQL_PASSWORD = os.environ["MYSQL_PASSWORD"]
 
 S3_BUCKET = os.environ.get("S3_BUCKET", "cloudshop-data-lake-2026-g05")
 
 # Plantilla: para agregar más tablas -> agregar otra entrada.
 EXTRACCIONES = {
-    "usuarios": ("SELECT * FROM usuarios", "usuarios/usuarios.csv"),
-    "direcciones_envio": ("SELECT * FROM direcciones_envio", "usuarios/direcciones_envio.csv"),
+    "categorias": ("SELECT * FROM categorias", "catalogo/categorias.csv"),
+    "productos": ("SELECT * FROM productos", "catalogo/productos.csv"),
+    "inventario": ("SELECT * FROM inventario", "catalogo/inventario.csv"),
+    "movimientos_stock": ("SELECT * FROM movimientos_stock", "catalogo/movimientos_stock.csv"),
 }
 
 
 def normalizar_valor(valor):
-    """Convierte tipos de PostgreSQL en valores CSV estables y sin secretos."""
+    """Convierte tipos de MySQL en valores CSV estables y sin secretos."""
     if valor is None:
         return ""
     if isinstance(valor, datetime):
@@ -45,7 +48,6 @@ def normalizar_valor(valor):
 
 
 def extraer_tabla(cur, consulta):
-    # ejecuta la consulta y devuelve (columnas, filas)
     cur.execute(consulta)
     columnas = [descripcion[0] for descripcion in cur.description]
     filas = cur.fetchall()
@@ -53,7 +55,6 @@ def extraer_tabla(cur, consulta):
 
 
 def a_csv(columnas, filas):
-    # convierte columnas + filas en bytes CSV
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(columnas)
@@ -63,13 +64,14 @@ def a_csv(columnas, filas):
 
 
 def main():
-    log.info("Conectando a PostgreSQL %s:%s/%s ...", POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB)
-    conn = psycopg2.connect(
-        host=POSTGRES_HOST,
-        port=POSTGRES_PORT,
-        dbname=POSTGRES_DB,
-        user=POSTGRES_USER,
-        password=POSTGRES_PASSWORD,
+    log.info("Conectando a MySQL %s:%s/%s ...", MYSQL_HOST, MYSQL_PORT, MYSQL_DB)
+    conn = pymysql.connect(
+        host=MYSQL_HOST,
+        port=MYSQL_PORT,
+        db=MYSQL_DB,
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD,
+        charset="utf8mb4",
     )
 
     # boto3 toma automáticamente las credenciales del IAM Role de la EC2.
