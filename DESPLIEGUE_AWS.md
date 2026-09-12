@@ -12,7 +12,8 @@ La plantilla crea:
 - Un **`sg-ingesta`** para la MV de ingesta.
 - Un **`sg-bd`** que permite MySQL (3306) y PostgreSQL (5432) **solo** desde
   `sg-app` y `sg-ingesta`.
-- Un **bucket S3** y un **IAM Role** para la ingesta.
+- Un **bucket S3**. La MV de ingesta usa el instance profile preexistente
+  `LabInstanceProfile` (AWS Academy no permite crear roles de IAM).
 
 La plantilla es:
 
@@ -173,7 +174,9 @@ cloudshop
 | `S3BucketName` | nombre único del bucket |
 | `SshCidr` | tu IP `/32`, si la conoces |
 
-10. Marca la casilla **“I acknowledge that AWS CloudFormation might create IAM resources”**.
+10. En **Permissions**, selecciona el rol del laboratorio **`LabRole`** (en AWS
+   Academy es obligatorio; la plantilla ya no crea recursos de IAM, así que no
+   hace falta marcar la casilla de *CAPABILITY_IAM*).
 11. Pulsa **Next → Next → Submit**.
 12. Espera el estado `CREATE_COMPLETE`.
 13. Abre la pestaña **Outputs**.
@@ -424,7 +427,9 @@ docker compose up -d --build
 ## 13. Preparar la MV de ingesta
 
 La MV de ingesta ya tiene acceso de red a MySQL y PostgreSQL (vía `sg-ingesta`)
-y usa usuarios de **solo lectura**.
+y usa usuarios de **solo lectura**. La instancia usa el instance profile
+`LabInstanceProfile`, así que `boto3` toma de ahí las credenciales para escribir
+en S3 (no hace falta configurar claves).
 
 ```powershell
 ssh -i tu-key.pem ubuntu@INGESTA_PUBLIC_IP

@@ -252,7 +252,7 @@ La MV de ingesta ejecuta contenedores Python (estrategia pull del 100 %): extrae
 - `ingesta-catalogo` → MySQL: `categorias`, `productos`, `inventario`, `movimientos_stock`.
 - `ingesta-ventas` (MongoDB) llega con el microservicio de Ventas/Reseñas.
 
-Cada contenedor se conecta con credenciales de **solo lectura** (`ingesta_pg` / `ingesta_my`, creadas en el primer arranque de las bases) y usa las credenciales de AWS del IAM Role de la EC2 (sin claves en el código). El contrato de datos (`usuario_id`, `producto_id`, `categoria_id` consistentes entre bases) ya está garantizado por este pipeline: los ids de los CSVs se cargan tal cual en las BDs, así que los cruces en Athena funcionan sin traducción.
+Cada contenedor se conecta con credenciales de **solo lectura** (`ingesta_pg` / `ingesta_my`, creadas en el primer arranque de las bases) y usa las credenciales de AWS del instance profile de la EC2 (`LabInstanceProfile` en AWS Academy, sin claves en el código). El contrato de datos (`usuario_id`, `producto_id`, `categoria_id` consistentes entre bases) ya está garantizado por este pipeline: los ids de los CSVs se cargan tal cual en las BDs, así que los cruces en Athena funcionan sin traducción.
 
 ### 5.4 Comandos de regeneración y carga (`Data/scripts/`)
 
@@ -293,13 +293,13 @@ El primer entregable se despliega con **AWS CloudFormation** desde un único tem
 | Security Groups | `sg-app`, `sg-ingesta` y `sg-bd`; la base solo acepta 3306/5432 desde `sg-app` y `sg-ingesta` (nunca `0.0.0.0/0`) |
 | 2 MV de aplicación (App 1 y App 2) | EC2 públicas que instalan Docker, clonan el repo y levantan `docker-compose.yml` (catálogo + usuarios), compartiendo `sg-app` |
 | MV de base de datos | EC2 **privada** (sin IP pública) con MySQL + PostgreSQL (`docker-compose.datos.yml`) |
-| MV de ingesta | EC2 con IAM Role que prepara los contenedores Python y escribe en S3 |
+| MV de ingesta | EC2 que prepara los contenedores Python y escribe en S3 usando `LabInstanceProfile` |
 | S3 | Bucket del data lake |
-| IAM | Rol de ingesta con permisos de escritura solo en el bucket |
+| IAM | Se reutiliza el instance profile `LabInstanceProfile` del laboratorio (no se crean roles; AWS Academy lo bloquea) |
 
 La elección de un **único template** (en lugar de varios anidados) se justifica en este
 entregable por simplicidad: un solo `create-stack` despliega VPC, seguridad, las 4 MV
-(2 de aplicación + datos + ingesta), S3 e IAM de forma atómica y reproducible; al crecer a producción puede partirse en
+(2 de aplicación + datos + ingesta), S3 e instancia de ingesta con `LabInstanceProfile` de forma atómica y reproducible; al crecer a producción puede partirse en
 stacks anidados (red, datos, aplicación, analítica). El paso a paso completo está en
 **`DESPLIEGUE_AWS.md`**.
 

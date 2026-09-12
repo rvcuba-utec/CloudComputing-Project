@@ -1,9 +1,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   CloudShop - Infraestructura del primer entregable. Crea la VPC, los Security
-  Groups (desarrollo, base de datos, ingesta), las 4 MV (2 de aplicación, datos
-  e ingesta), el bucket S3 del data lake y el IAM Role de ingesta. Las bases de
-  datos quedan en una subred privada (sin IP pública).
+  Groups (app, base de datos, ingesta), las 4 MV (2 de aplicación, datos e
+  ingesta) y el bucket S3 del data lake. La MV de ingesta usa el instance
+  profile preexistente LabInstanceProfile (AWS Academy no permite crear roles
+  de IAM). Las bases de datos quedan en una subred privada (sin IP pública).
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -297,7 +298,8 @@ Resources:
           Value: !Sub '${AWS::StackName}-sg-ingesta'
 
   # =========================================================================
-  # S3 (data lake) + IAM Role de ingesta
+  # S3 (data lake). La MV de ingesta usa el instance profile del laboratorio
+  # (LabInstanceProfile): AWS Academy no permite crear roles de IAM.
   # =========================================================================
   DataLakeBucket:
     Type: AWS::S3::Bucket
@@ -307,39 +309,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-datalake'
-
-  IngestaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: IngestaS3Write
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !Sub 'arn:aws:s3:::${S3BucketName}'
-                  - !Sub 'arn:aws:s3:::${S3BucketName}/*'
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-rol-ingesta'
-
-  IngestaInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-        - !Ref IngestaRole
 
   # =========================================================================
   # Instancias EC2
@@ -507,7 +476,7 @@ Resources:
       SubnetId: !Ref PublicSubnet
       SecurityGroupIds:
         - !Ref IngestaSecurityGroup
-      IamInstanceProfile: !Ref IngestaInstanceProfile
+      IamInstanceProfile: LabInstanceProfile
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:

@@ -28,7 +28,7 @@ Ingesta/                  MV de ingesta (contenedores Python → S3)
 └── docker-compose.yml    orquesta los contenedores de ingesta
 
 infrastructure/           Infraestructura como código (CloudFormation)
-└── cloudformation.yaml   VPC, subredes, Security Groups, 4 MV, S3, IAM
+└── cloudformation.yaml   VPC, subredes, Security Groups, 4 MV, S3
 
 Proposal/                 Documentos de sustentación
 ├── 03_Sustentacion_final.md   ← documento principal (backend + datos)
@@ -49,7 +49,7 @@ Proposal/                 Documentos de sustentación
 - **Total: ~76,000 registros operacionales**
 
 **Infraestructura (primer entregable):**
-- `infrastructure/cloudformation.yaml` despliega la VPC, los Security Groups (app, base de datos privada, ingesta), las 4 MV (2 de aplicación + datos + ingesta), el bucket S3 y el IAM Role de ingesta.
+- `infrastructure/cloudformation.yaml` despliega la VPC, los Security Groups (app, base de datos privada, ingesta), las 4 MV (2 de aplicación + datos + ingesta) y el bucket S3. La MV de ingesta reutiliza el instance profile del laboratorio `LabInstanceProfile`.
 - `Ingesta/` contiene los contenedores Python que extraen el 100 % de los registros y los cargan en S3 (usuarios + catálogo).
 - Guía paso a paso: `DESPLIEGUE_AWS.md`.
 
