@@ -70,7 +70,7 @@ Parameters:
     Description: URL pública del repositorio (se clona en cada MV).
   S3BucketName:
     Type: String
-    Default: cloudshop-data-lake-2026-g05
+    Default: cloudshop-data-lake-2026-utec-mr
     Description: Nombre del bucket S3 del data lake (debe ser único globalmente).
   MySqlDatabase:
     Type: String
