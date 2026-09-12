@@ -9,7 +9,7 @@ import os
 import re
 import json
 
-LIMIT_PER_CATEGORY = 10
+LIMIT_PER_CATEGORY = 200
 MAX_WORKERS = 6
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
