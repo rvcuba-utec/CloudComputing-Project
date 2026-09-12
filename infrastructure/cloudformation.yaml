@@ -211,7 +211,6 @@ Resources:
 
   PrivateRoute:
     Type: AWS::EC2::Route
-    DependsOn: NatGateway
     Properties:
       RouteTableId: !Ref PrivateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
@@ -231,7 +230,7 @@ Resources:
   AppSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: MV de aplicación/desarrollo (catálogo + usuarios)
+      GroupDescription: MV de aplicacion/desarrollo (catalogo + usuarios)
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -304,6 +303,7 @@ Resources:
   DataLakeBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Ref S3BucketName
       Tags:
