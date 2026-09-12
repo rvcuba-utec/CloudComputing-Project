@@ -28,11 +28,11 @@ Parameters:
   # --- Acceso ---------------------------------------------------------------
   KeyName:
     Type: String
-    Description: Par de llaves SSH (EC2 Key Pair) existente en la región.
+    Description: Par de llaves SSH (EC2 Key Pair) existente en la región. En AWS Academy usa "vockey".
   AmiId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-ssd/ami-id
-    Description: AMI de Ubuntu 22.04 (por defecto, la oficial vía SSM).
+    Type: String
+    Default: ami-0b33d2f1547e52c78
+    Description: ID de la AMI de Ubuntu 22.04 (x86_64). Verifícalo en EC2 → Launch instance → Ubuntu 22.04 LTS, y cámbialo si despliegas en otra región/cuenta.
   SshCidr:
     Type: String
     Default: 0.0.0.0/0

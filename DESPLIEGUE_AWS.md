@@ -68,12 +68,18 @@ Necesitas:
 La plantilla usa por defecto:
 
 ```text
-AMI: Ubuntu 22.04 (vía SSM, /aws/service/canonical/.../ebs-ssd/ami-id)
-KeyName: (lo eliges tú al crear el stack)
+AMI: Ubuntu 22.04 (String, ami-0b33d2f1547e52c78)
+KeyName: (lo eliges tú al crear el stack; en AWS Academy usa "vockey")
 Tipo: t3.micro
 ```
 
 Si tu curso usa otra AMI o llave, cambia los parámetros al crear el stack.
+
+> **Nota AWS Academy / Learner Lab:** el Learner Lab bloquea la lectura de
+> parámetros públicos de SSM, por eso la plantilla **no** usa
+> `AWS::SSM::Parameter::Value` para la AMI, sino un ID fijo (`String`). Si el
+> ID por defecto no arranca, copia el de tu cuenta: EC2 → **Launch instance** →
+> elige **Ubuntu 22.04 LTS (64-bit x86)** y copia el `ami-...` que aparece.
 
 ---
 
@@ -81,7 +87,14 @@ Si tu curso usa otra AMI o llave, cambia los parámetros al crear el stack.
 
 ### `KeyName`
 
-El par de llaves para entrar por SSH a las MVs. Es **obligatorio**.
+El par de llaves para entrar por SSH a las MVs. Es **obligatorio**. En AWS
+Academy Learner Lab el nombre por defecto es `vockey` (y descargas `labsuser.pem`).
+
+### `AmiId`
+
+ID de la AMI de Ubuntu 22.04. Ya viene con un valor por defecto, pero si no
+arranca, cámbialo por el que muestra tu consola (EC2 → Launch instance → Ubuntu
+22.04 LTS).
 
 ### `SshCidr`
 
