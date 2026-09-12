@@ -240,11 +240,11 @@ Resources:
         - IpProtocol: tcp
           FromPort: 8080
           ToPort: 8080
-          CidrIp: 0.0.0.0/0
+          SourceSecurityGroupId: !Ref NlbSecurityGroup
         - IpProtocol: tcp
           FromPort: 8000
           ToPort: 8000
-          CidrIp: 0.0.0.0/0
+          SourceSecurityGroupId: !Ref NlbSecurityGroup
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-sg-app'
@@ -296,6 +296,27 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}-sg-ingesta'
 
+  # NLB: recibe tráfico de API Gateway y lo distribuye entre App 1 y App 2.
+  # No necesita reglas de ingreso propias; las MVs app solo aceptarán tráfico
+  # proveniente de este SG (ver AppSecurityGroup abajo).
+  NlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: NLB interno (API Gateway → App 1 / App 2)
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-nlb-sg'
+
   # =========================================================================
   # S3 (data lake). La MV de ingesta usa el instance profile del laboratorio
   # (LabInstanceProfile): AWS Academy no permite crear roles de IAM.
@@ -344,6 +365,7 @@ Resources:
               systemctl enable --now docker
               usermod -aG docker ubuntu
               git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
+              chown -R ubuntu:ubuntu /home/ubuntu/cloudshop
               cat > /home/ubuntu/cloudshop/Backend/.env <<'EOF'
               MYSQL_HOST=${DataPrivateIp}
               MYSQL_PORT=3306
@@ -403,6 +425,7 @@ Resources:
               systemctl enable --now docker
               usermod -aG docker ubuntu
               git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
+              chown -R ubuntu:ubuntu /home/ubuntu/cloudshop
               cat > /home/ubuntu/cloudshop/Backend/.env <<'EOF'
               MYSQL_HOST=${DataPrivateIp}
               MYSQL_PORT=3306
@@ -461,6 +484,7 @@ Resources:
             systemctl enable --now docker
             usermod -aG docker ubuntu
             git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
+              chown -R ubuntu:ubuntu /home/ubuntu/cloudshop
             # Las contrasenas de los usuarios de solo lectura de ingesta son
             # parametros del stack: se inyectan en los scripts de init de las BD
             # para que coincidan con el .env que se genera en la MV de ingesta.
@@ -514,6 +538,7 @@ Resources:
               systemctl enable --now docker
               usermod -aG docker ubuntu
               git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
+              chown -R ubuntu:ubuntu /home/ubuntu/cloudshop
               cat > /home/ubuntu/cloudshop/Ingesta/ingesta-usuarios/.env <<'EOF'
               POSTGRES_HOST=${DataPrivateIp}
               POSTGRES_PORT=5432
@@ -552,3 +577,6 @@ Outputs:
   S3BucketName:
     Description: Bucket S3 del data lake
     Value: !Ref DataLakeBucket
+  NlbSecurityGroupId:
+    Description: ID del Security Group del NLB (asignarlo al NLB y usarlo como origen en sg-app)
+    Value: !Ref NlbSecurityGroup

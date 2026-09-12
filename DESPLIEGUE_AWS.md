@@ -228,15 +228,126 @@ usuarios/direcciones_envio.csv
 
 ## 8. Configurar NLB y API Gateway (Hito 2)
 
-Desde la consola de AWS (no hace falta terminal):
+Todo desde la consola de AWS, sin terminal.
 
-1. **EC2 → Load Balancers → Create → Network Load Balancer** (interno/privado).
-2. Crea dos **Target Groups**: uno para el puerto `8080` (catálogo) y otro para
-   `8000` (usuarios). Health check en `/health`.
-3. Registra **App 1 y App 2** en ambos Target Groups.
-4. Crea los listeners del NLB.
-5. Modifica `sg-app` para que 8080/8000 solo entren desde el SG del NLB.
-6. En **API Gateway → HTTP API**, crea una integración con el DNS del NLB.
+### 8.1 Crear el Security Group del NLB
+
+**EC2 → Security Groups → Create security group**
+
+| Campo | Valor |
+|---|---|
+| Name | `cloudshop-nlb-sg` |
+| VPC | `cloudshop-vpc (10.0.0.0/16)` |
+| Inbound rules | TCP 8080 desde `0.0.0.0/0` |
+| Inbound rules | TCP 8000 desde `0.0.0.0/0` |
+| Outbound rules | dejar el default (All traffic) |
+
+Copia el ID del SG creado (ej. `sg-06beb564903f8b610`).
+
+### 8.2 Restringir sg-app al NLB
+
+**EC2 → Security Groups → `cloudshop-sg-app` → Inbound rules → Edit**
+
+- **Elimina** las reglas de 8080 y 8000 que apuntan a `0.0.0.0/0`
+- **Agrega** dos reglas nuevas:
+
+| Type | Port | Source |
+|---|---|---|
+| Custom TCP | 8080 | `cloudshop-nlb-sg` (ID del paso anterior) |
+| Custom TCP | 8000 | `cloudshop-nlb-sg` |
+
+### 8.3 Crear los Target Groups
+
+**EC2 → Target Groups → Create target group** (repite dos veces)
+
+| Campo | TG Catálogo | TG Usuarios |
+|---|---|---|
+| Target type | Instances | Instances |
+| Name | `cloudshop-tg-catalogo` | `cloudshop-tg-usuarios` |
+| Protocol | TCP | TCP |
+| Port | `8080` | `8000` |
+| VPC | `cloudshop-vpc` | `cloudshop-vpc` |
+| Health check protocol | HTTP | HTTP |
+| Health check path | `/health` | `/health` |
+| Targets | App 1 + App 2 | App 1 + App 2 |
+
+### 8.4 Crear el NLB
+
+**EC2 → Load Balancers → Create → Network Load Balancer**
+
+| Campo | Valor |
+|---|---|
+| Name | `cloudshop-nlb` |
+| Scheme | **Internal** |
+| IP address type | IPv4 |
+| VPC | `cloudshop-vpc (10.0.0.0/16)` |
+| Subnet | `cloudshop-subnet-publica (10.0.1.0/24)` |
+| Security group | `cloudshop-nlb-sg` |
+
+Listeners:
+
+| Protocol | Port | Target group |
+|---|---|---|
+| TCP | 8080 | `cloudshop-tg-catalogo` |
+| TCP | 8000 | `cloudshop-tg-usuarios` |
+
+Crea el NLB. Copia el **DNS name** que aparece en la pestaña Details.
+
+### 8.5 Crear el VPC Link
+
+**API Gateway → VPC Links → Create**
+
+| Campo | Valor |
+|---|---|
+| Version | VPC link V2 |
+| Name | `cloudshop-vpc-link` |
+| VPC | `cloudshop-vpc` |
+| Subnet | `cloudshop-subnet-publica (10.0.1.0/24)` |
+| Security group | `cloudshop-nlb-sg` |
+
+Espera que el estado pase a **Available** (~2-3 min).
+
+### 8.6 Crear la HTTP API
+
+**API Gateway → Create API → HTTP API → Build**
+
+- Name: `CloudShop-API`
+- No agregues integraciones en el wizard → Next → Next → Next → Create
+
+### 8.7 Crear las integraciones
+
+Dentro de la API → **Integrations → Create** (repite dos veces)
+
+| Campo | Integración catálogo | Integración usuarios |
+|---|---|---|
+| Integration type | Private resource | Private resource |
+| Selection method | Select manually | Select manually |
+| Target service | ALB/NLB | ALB/NLB |
+| Load balancer | `cloudshop-nlb` | `cloudshop-nlb` |
+| Listener | TCP 8080 | TCP 8000 |
+| VPC Link | `cloudshop-vpc-link` | `cloudshop-vpc-link` |
+
+### 8.8 Crear las rutas
+
+Dentro de la API → **Routes → Create** (repite dos veces)
+
+| Method | Path | Integración |
+|---|---|---|
+| ANY | `/api/catalogo/{proxy+}` | TCP 8080 |
+| ANY | `/usuarios/{proxy+}` | TCP 8000 |
+
+Para cada ruta: selecciónala → **Attach integration** → elige la integración correspondiente.
+
+### 8.9 Verificar
+
+En la API → pestaña **Stages** copia la **Invoke URL** (algo como `https://tavhv4deyj.execute-api.us-east-1.amazonaws.com`).
+
+Prueba desde cualquier navegador o terminal:
+
+```bash
+curl https://TU_INVOKE_URL/api/catalogo/health
+curl https://TU_INVOKE_URL/usuarios/health
+```
 
 El flujo final:
 
