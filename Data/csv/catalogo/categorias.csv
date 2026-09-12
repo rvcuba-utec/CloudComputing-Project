@@ -1,8 +1,51 @@
 id,nombre,descripcion
-1,Tecnologia,Catálogo de tecnologia
-2,Electrohogar,Catálogo de electrohogar
-3,Muebles,Catálogo de muebles
-4,Belleza Higiene Salud,Catálogo de belleza higiene salud
-5,Deportes,Catálogo de deportes
-6,Automotriz,Catálogo de automotriz
-7,Hombre,Catálogo de hombre
+1,Celulares,Catálogo de celulares
+2,Laptops,Catálogo de laptops
+3,Televisores,Catálogo de televisores
+4,Audifonos,Catálogo de audifonos
+5,Smartwatches,Catálogo de smartwatches
+6,Consolas,Catálogo de consolas
+7,Monitores,Catálogo de monitores
+8,Impresoras,Catálogo de impresoras
+9,Sillas Gamer,Catálogo de sillas gamer
+10,Camaras,Catálogo de camaras
+11,Drones,Catálogo de drones
+12,Asistentes De Voz,Catálogo de asistentes de voz
+13,Proyectores,Catálogo de proyectores
+14,Refrigeradoras,Catálogo de refrigeradoras
+15,Lavadoras,Catálogo de lavadoras
+16,Cocinas,Catálogo de cocinas
+17,Microondas,Catálogo de microondas
+18,Freidoras De Aire,Catálogo de freidoras de aire
+19,Cafeteras,Catálogo de cafeteras
+20,Licuadoras,Catálogo de licuadoras
+21,Aspiradoras,Catálogo de aspiradoras
+22,Aire Acondicionado,Catálogo de aire acondicionado
+23,Secadores De Cabello,Catálogo de secadores de cabello
+24,Sofas,Catálogo de sofas
+25,Comedores,Catálogo de comedores
+26,Escritorios,Catálogo de escritorios
+27,Sillas De Oficina,Catálogo de sillas de oficina
+28,Roperos,Catálogo de roperos
+29,Zapateras,Catálogo de zapateras
+30,Racks De Tv,Catálogo de racks de tv
+31,Muebles De Terraza,Catálogo de muebles de terraza
+32,Colchones,Catálogo de colchones
+33,Camas,Catálogo de camas
+34,Sabanas,Catálogo de sabanas
+35,Edredones,Catálogo de edredones
+36,Almohadas,Catálogo de almohadas
+37,Perfumes,Catálogo de perfumes
+38,Maquillaje,Catálogo de maquillaje
+39,Cuidado Facial,Catálogo de cuidado facial
+40,Cuidado Capilar,Catálogo de cuidado capilar
+41,Zapatillas Urbanas,Catálogo de zapatillas urbanas
+42,Zapatillas Deportivas,Catálogo de zapatillas deportivas
+43,Casacas,Catálogo de casacas
+44,Jeans,Catálogo de jeans
+45,Polos,Catálogo de polos
+46,Carteras,Catálogo de carteras
+47,Relojes,Catálogo de relojes
+48,Juguetes,Catálogo de juguetes
+49,Bicicletas,Catálogo de bicicletas
+50,Maquinas De Gimnasio,Catálogo de maquinas de gimnasio

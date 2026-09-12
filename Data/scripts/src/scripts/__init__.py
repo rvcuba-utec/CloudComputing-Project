@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from scripts!")
+# Scripts de datos para CloudShop.

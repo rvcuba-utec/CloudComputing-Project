@@ -12,7 +12,7 @@ import json
 LIMIT_PER_CATEGORY = 200
 MAX_WORKERS = 6
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 CSV_DIR = os.path.join(BASE_DIR, "csv")
 IMAGES_FOLDER = os.path.join(CSV_DIR, "imagenes")
 OUTPUT_CSV_FILE = os.path.join(CSV_DIR, "products.csv")

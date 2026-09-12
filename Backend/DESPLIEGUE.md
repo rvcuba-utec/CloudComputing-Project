@@ -95,7 +95,7 @@ uv run python -m scripts.load_csv_bd --solo-postgres
 
 Qué hace la carga:
 
-- **MySQL** → `categorias` (7), `productos` (6,497), `inventario` (6,497) y `CALL poblar_movimientos_stock(25000)` (bitácora de stock).
+- **MySQL** → `categorias` (50), `productos` (5,699), `inventario` (5,699) y `CALL poblar_movimientos_stock(25000)` (bitácora de stock).
 - **PostgreSQL** → `usuarios` (20,000) y `direcciones_envio` (20,000) vía `COPY`; reajusta las secuencias `SERIAL` para que la API pueda insertar sin colisiones.
 
 Verificación:

@@ -41,9 +41,9 @@ uv run python -m scripts.load_csv_bd                 # carga completa
 |---|---|
 | usuarios | 20,000 |
 | direcciones_envio | 20,000 |
-| categorías | 7 |
-| productos | 6,497 |
-| inventario | 6,497 (324 agotados) |
+| categorías | 50 |
+| productos | 5,699 |
+| inventario | 5,699 (284 agotados) |
 | movimientos_stock (al cargar) | 25,000 |
 
 Guía completa de despliegue y carga: `Backend/DESPLIEGUE.md`.

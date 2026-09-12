@@ -1,0 +1,19 @@
+# Variables de entorno (nunca versionar secretos)
+.env
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Configuración de IDE
+.idea/
+.vscode/
+
+# Imágenes del scraping (muy pesadas, se regeneran con el scraper)
+Data/csv/imagenes/
