@@ -475,6 +475,10 @@ Resources:
             PG_PASSWORD=${PostgresPassword}
             PG_DATABASE=${PostgresDatabase}
             EOF
+            apt-get remove -y mysql-server mysql-client mysql-common 2>/dev/null || true
+            systemctl stop mysql mariadb 2>/dev/null || true
+            systemctl disable mysql mariadb 2>/dev/null || true
+            fuser -k 3306/tcp 2>/dev/null || true
             cd /home/ubuntu/cloudshop/Backend
             docker compose -f docker-compose.datos.yml up -d
 
