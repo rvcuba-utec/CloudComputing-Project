@@ -260,7 +260,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: !Ref SshCidr
+          SourceSecurityGroupId: !Ref AppSecurityGroup
         - IpProtocol: tcp
           FromPort: 3306
           ToPort: 3306
@@ -301,6 +301,7 @@ Resources:
   # =========================================================================
   DataLakeBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
     Properties:
       BucketName: !Ref S3BucketName
       Tags:
@@ -389,6 +390,14 @@ Resources:
               CORS_ORIGINS=${CorsOrigins}
               EOF
               cd /home/ubuntu/cloudshop/Backend
+              for i in $(seq 1 60); do
+                if (echo > /dev/tcp/${DataPrivateIp}/3306) 2>/dev/null && (echo > /dev/tcp/${DataPrivateIp}/5432) 2>/dev/null; then
+                  echo "MV de datos disponible (3306/5432)."
+                  break
+                fi
+                echo "Esperando a la MV de datos (intento $i/60)..."
+                sleep 10
+              done
               docker compose up -d --build
             - DataPrivateIp: !GetAtt DataInstance.PrivateIp
 
@@ -438,6 +447,14 @@ Resources:
               CORS_ORIGINS=${CorsOrigins}
               EOF
               cd /home/ubuntu/cloudshop/Backend
+              for i in $(seq 1 60); do
+                if (echo > /dev/tcp/${DataPrivateIp}/3306) 2>/dev/null && (echo > /dev/tcp/${DataPrivateIp}/5432) 2>/dev/null; then
+                  echo "MV de datos disponible (3306/5432)."
+                  break
+                fi
+                echo "Esperando a la MV de datos (intento $i/60)..."
+                sleep 10
+              done
               docker compose up -d --build
             - DataPrivateIp: !GetAtt DataInstance.PrivateIp
 
@@ -460,27 +477,26 @@ Resources:
           Value: !Sub '${AWS::StackName}-mv-base-de-datos'
       UserData:
         Fn::Base64:
-          Fn::Sub:
-            - |
-              #!/bin/bash
-              set -e
-              exec > /var/log/userdata.log 2>&1
-              apt-get update -y
-              apt-get install -y docker.io docker-compose-plugin git
-              systemctl enable --now docker
-              usermod -aG docker ubuntu
-              git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
-              cat > /home/ubuntu/cloudshop/Backend/.env <<'EOF'
-              MYSQL_DATABASE=${MySqlDatabase}
-              MYSQL_USER=${MySqlUser}
-              MYSQL_PASSWORD=${MySqlPassword}
-              MYSQL_ROOT_PASSWORD=${MySqlRootPassword}
-              PG_USER=${PostgresUser}
-              PG_PASSWORD=${PostgresPassword}
-              PG_DATABASE=${PostgresDatabase}
-              EOF
-              cd /home/ubuntu/cloudshop/Backend
-              docker compose -f docker-compose.datos.yml up -d
+          Fn::Sub: |
+            #!/bin/bash
+            set -e
+            exec > /var/log/userdata.log 2>&1
+            apt-get update -y
+            apt-get install -y docker.io docker-compose-plugin git
+            systemctl enable --now docker
+            usermod -aG docker ubuntu
+            git clone --depth 1 ${RepoUrl} /home/ubuntu/cloudshop
+            cat > /home/ubuntu/cloudshop/Backend/.env <<'EOF'
+            MYSQL_DATABASE=${MySqlDatabase}
+            MYSQL_USER=${MySqlUser}
+            MYSQL_PASSWORD=${MySqlPassword}
+            MYSQL_ROOT_PASSWORD=${MySqlRootPassword}
+            PG_USER=${PostgresUser}
+            PG_PASSWORD=${PostgresPassword}
+            PG_DATABASE=${PostgresDatabase}
+            EOF
+            cd /home/ubuntu/cloudshop/Backend
+            docker compose -f docker-compose.datos.yml up -d
 
   IngestaInstance:
     Type: AWS::EC2::Instance
@@ -528,6 +544,7 @@ Resources:
               MYSQL_PASSWORD=${IngestaMyPassword}
               S3_BUCKET=${S3BucketName}
               EOF
+              echo "Ingesta preparada. Tras cargar los datos ejecutar: cd /home/ubuntu/cloudshop/Ingesta && docker compose up --build"
             - DataPrivateIp: !GetAtt DataInstance.PrivateIp
 
 Outputs:
