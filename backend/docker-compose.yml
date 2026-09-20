@@ -2,13 +2,20 @@
 # Las bases de datos NO viven aquí: corren en la VM de datos
 # (Backend/docker-compose.datos.yml) y se alcanzan por IP privada.
 #
-# Uso:
-#   cp .env.example .env && nano .env   # definir IP de la VM de datos, claves, JWT y CORS
-#   docker compose up -d --build
+# Uso en la MV de desarrollo (donde se construyen las imágenes):
+#   cp .env.example .env && nano .env   # definir IP de la VM de datos, claves, JWT, CORS y DOCKERHUB_USER
+#   docker compose build
+#   docker login
+#   docker compose push
+#
+# Uso en las MV de producción (app-1 y app-2, solo descargan las imágenes ya publicadas):
+#   docker compose pull
+#   docker compose up -d
 
 services:
   catalogo:
     build: ./products
+    image: ${DOCKERHUB_USER:?Define DOCKERHUB_USER en .env (tu usuario de Docker Hub)}/cloudshop-catalogo:latest
     container_name: cloudshop-catalogo
     restart: unless-stopped
     environment:
@@ -29,6 +36,7 @@ services:
 
   usuarios:
     build: ./users-address
+    image: ${DOCKERHUB_USER:?Define DOCKERHUB_USER en .env}/cloudshop-usuarios:latest
     container_name: cloudshop-usuarios
     restart: unless-stopped
     environment:
@@ -49,6 +57,7 @@ services:
 
   ventas-resenas:
     build: ./ventas-resenas
+    image: ${DOCKERHUB_USER:?Define DOCKERHUB_USER en .env}/cloudshop-ventas-resenas:latest
     container_name: cloudshop-ventas-resenas
     restart: unless-stopped
     environment:
@@ -67,6 +76,7 @@ services:
 
   ordenes:
     build: ./ordenes
+    image: ${DOCKERHUB_USER:?Define DOCKERHUB_USER en .env}/cloudshop-ordenes:latest
     container_name: cloudshop-ordenes
     restart: unless-stopped
     environment:
@@ -89,6 +99,7 @@ services:
 
   analitica:
     build: ./analitica
+    image: ${DOCKERHUB_USER:?Define DOCKERHUB_USER en .env}/cloudshop-analitica:latest
     container_name: cloudshop-analitica
     restart: unless-stopped
     environment:

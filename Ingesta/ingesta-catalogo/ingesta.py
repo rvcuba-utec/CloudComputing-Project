@@ -23,12 +23,14 @@ MYSQL_PASSWORD = os.environ["MYSQL_PASSWORD"]
 
 S3_BUCKET = os.environ.get("S3_BUCKET", "cloudshop-data-lake-2026-utec-mr-cs2032-v2")
 
-# Plantilla: para agregar más tablas -> agregar otra entrada.
+# Cada tabla vive en su PROPIO prefijo de S3 (una carpeta = una tabla de Athena/Glue).
+# Si dos archivos con esquemas distintos compartieran prefijo, Athena los leería
+# como una sola tabla y mezclaría las columnas.
 EXTRACCIONES = {
-    "categorias": ("SELECT * FROM categorias", "catalogo/categorias.csv"),
-    "productos": ("SELECT * FROM productos", "catalogo/productos.csv"),
-    "inventario": ("SELECT * FROM inventario", "catalogo/inventario.csv"),
-    "movimientos_stock": ("SELECT * FROM movimientos_stock", "catalogo/movimientos_stock.csv"),
+    "categorias": ("SELECT * FROM categorias", "categorias/categorias.csv"),
+    "productos": ("SELECT * FROM productos", "productos/productos.csv"),
+    "inventario": ("SELECT * FROM inventario", "inventario/inventario.csv"),
+    "movimientos_stock": ("SELECT * FROM movimientos_stock", "movimientos_stock/movimientos_stock.csv"),
 }
 
 

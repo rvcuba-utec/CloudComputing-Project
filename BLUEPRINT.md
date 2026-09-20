@@ -10,7 +10,8 @@
 
 CloudShop es un e-commerce con arquitectura de microservicios sobre AWS. Se compone de:
 
-- **5 microservicios** en Docker (3 lenguajes, 2 BD SQL + 1 NoSQL, 1 sin BD, 1 analítico).
+- **5 microservicios** en Docker (3 lenguajes, 2 BD SQL + 1 NoSQL, 1 sin BD, 1 analítico) — **los 5 implementados**.
+- **Roles de usuario** (`usuario` / `admin`) vía un claim `rol` en el mismo JWT que emite MS1; MS2/MS3/MS4/MS5 lo verifican sin consultar la base de usuarios (ver §5.7).
 - **4 máquinas virtuales EC2**: 2 de producción (app), 1 de datos y 1 de ingesta.
 - **1 VPC** con una subred pública y un Internet Gateway (sin NAT).
 - **1 ALB** (Application Load Balancer) en el puerto 80 que reparte el tráfico HTTP entre las 2 MV de aplicación.
@@ -144,23 +145,27 @@ Todos corren en las dos MV de aplicación con el mismo `Backend/docker-compose.y
 
 | # | Servicio | Lenguaje/Framework | Base de datos | Puerto | Carpeta | Estado |
 |---|---|---|---|---|---|---|
-| 1 | Usuarios y Direcciones | Python / FastAPI | PostgreSQL | **8000** | `Backend/users-address/` | ✅ implementado |
-| 2 | Catálogo e Inventario | Go / Gin | MySQL | **8080** | `Backend/products/` | ✅ implementado |
-| 3 | Ventas y Reseñas | Node.js / NestJS | MongoDB | **8002** | `Backend/ventas-resenas/` *(nuevo)* | ⏳ pendiente |
-| 4 | Órdenes (orquestador) | Python / FastAPI | — (sin BD) | **8003** | `Backend/ordenes/` *(nuevo)* | ⏳ pendiente |
-| 5 | Analítica | Python / FastAPI | Athena | **8001** | `Backend/analitica/` *(nuevo)* | ⏳ pendiente |
+| 1 | Usuarios y Direcciones | Python / FastAPI | PostgreSQL | **8000** | `Backend/users-address/` | ✅ implementado (+ roles) |
+| 2 | Catálogo e Inventario | Go / Gin | MySQL | **8080** | `Backend/products/` | ✅ implementado (+ admin CRUD) |
+| 3 | Ventas y Reseñas | **Node.js / Express** (no NestJS — decisión del equipo: mismo lenguaje, menos boilerplate) | MongoDB | **8002** | `Backend/ventas-resenas/` | ✅ implementado |
+| 4 | Órdenes (orquestador) | Python / FastAPI | — (sin BD) | **8003** | `Backend/ordenes/` | ✅ implementado |
+| 5 | Analítica | Python / FastAPI | Athena | **8001** | `Backend/analitica/` | ✅ implementado (requiere S3+Glue poblados) |
+
+> **MS3 en Express, no NestJS:** el blueprint original pedía NestJS; se optó por Express + Mongoose por ser más liviano y no afectar el despliegue (sigue siendo Node.js, mismas rutas REST). Documentado aquí para que quien lea el blueprint no espere módulos/decoradores de Nest en el código.
 
 ### 5.1 MS1 Usuarios (Python + PostgreSQL, :8000)
 
-Base `cloudshop_usuarios`. Tablas: `usuarios` (20,000), `direcciones_envio` (20,000). JWT HS256 (60 min).
+Base `cloudshop_usuarios`. Tablas: `usuarios` (20,000, columna `rol` agregada), `direcciones_envio` (20,000). JWT HS256 (60 min), payload `{sub, rol, exp}`.
 
 ```http
 GET  /health
-POST /usuarios/auth/register
+POST /usuarios/auth/register                  # rol="admin" si el email está en ADMIN_EMAILS, si no "usuario"
 POST /usuarios/auth/login
 GET  /usuarios/me
-GET  /usuarios/{id}
-PATCH /usuarios/{id}
+GET  /usuarios                                # admin only — lista paginada de usuarios
+GET  /usuarios/{id}                           # dueño o admin
+PATCH /usuarios/{id}                          # dueño o admin (nombre/estado)
+PATCH /usuarios/{id}/rol                      # admin only — promueve/degrada a otro usuario
 GET  /usuarios/{id}/direcciones
 POST /usuarios/{id}/direcciones
 PATCH /usuarios/{id}/direcciones/{dir_id}
@@ -170,6 +175,7 @@ DELETE /usuarios/{id}/direcciones/{dir_id}
 - Dockerfile: `Backend/users-address/Dockerfile` (uvicorn `:8000`).
 - Swagger nativo: `/docs` (además existe el catálogo centralizado de §11).
 - Contraseñas Faker: `usuario` + id con 5 dígitos (ej. id 42 → `usuario00042`).
+- Bootstrap de administradores: variable `ADMIN_EMAILS` (coma-separado); cualquier registro con ese email nace con `rol=admin`.
 
 ### 5.2 MS2 Catálogo e Inventario (Go + MySQL, :8080)
 
@@ -181,43 +187,62 @@ GET  /api/catalogo/categorias
 GET  /api/catalogo/productos                  # ?page &limit &categoria_id &q &precio_min &precio_max &solo_activos
 GET  /api/catalogo/productos/{id}
 GET  /api/catalogo/productos/{id}/movimientos
-POST /api/catalogo/inventario/reservar        # { producto_id, cantidad } → SELECT FOR UPDATE
-POST /api/catalogo/inventario/liberar
-POST /api/catalogo/inventario/confirmar-venta
+POST /api/catalogo/inventario/reservar        # requiere sesión — { producto_id, cantidad } → SELECT FOR UPDATE
+POST /api/catalogo/inventario/liberar         # requiere sesión
+POST /api/catalogo/inventario/confirmar-venta # requiere sesión
+POST /api/catalogo/productos                  # admin only
+PATCH /api/catalogo/productos/{id}            # admin only
+DELETE /api/catalogo/productos/{id}           # admin only — borrado lógico (activo=0)
+POST /api/catalogo/categorias                 # admin only
+PATCH /api/catalogo/categorias/{id}           # admin only
+DELETE /api/catalogo/categorias/{id}          # admin only — 409 si hay productos asignados
 ```
 
 - Dockerfile: `Backend/products/Dockerfile` (multi-stage Go, `PORT`=8080).
+- Verifica el JWT HS256 **a mano** con la librería estándar (`crypto/hmac`, sin dependencias nuevas en `go.mod`); ver `Backend/products/auth.go`. Requiere `JWT_SECRET` (mismo valor que MS1).
 
-### 5.3 MS3 Ventas y Reseñas (Node.js + MongoDB, :8002) — *pendiente*
+### 5.3 MS3 Ventas y Reseñas (Node.js + Express + Mongoose, :8002)
 
-Colecciones: `ordenes` (o `ventas`) y `resenas` (documentos JSON). Estructuras en `Proposal/01_Sustentacion_Backend_Frontend_CloudShop.md` §4.3.
+Base `cloudshop_ventas`. Colecciones: `ventas` (documento con `items[]` embebidos) y `resenas` (única por `producto_id`+`usuario_id`).
 
 ```http
-POST /ventas
-GET  /usuarios/{usuarioId}/ventas
-GET  /productos/{productoId}/resenas
-POST /productos/{productoId}/resenas
+GET   /health
+POST  /ventas                                 # crea una venta; si no es admin, ignora usuario_id del body y usa el del token
+GET   /ventas                                 # admin only — todas las ventas, paginado
+GET   /ventas/{id}                            # dueño o admin
+PATCH /ventas/{id}/estado                     # dueño o admin — usado por MS4 para mover pendiente→confirmada/fallida/cancelada
+GET   /usuarios/{usuarioId}/ventas            # dueño o admin — historial de compras
+GET   /productos/{productoId}/resenas         # público — lista + promedio de calificación
+POST  /productos/{productoId}/resenas         # requiere sesión — una reseña por usuario y producto
 ```
 
-- Valida producto/usuario llamando a MS2/MS1 por HTTP (consume otros microservicios).
-- ~10,000 documentos Faker para cumplir el requisito NoSQL.
+- Verifica el mismo JWT HS256 de MS1 con la librería `jsonwebtoken` (`Backend/ventas-resenas/src/middleware/auth.js`). Requiere `JWT_SECRET` y `MONGO_URI`.
+- Rutas alineadas 1:1 con las reglas de path del ALB (§10).
 
-### 5.4 MS4 Órdenes (Python, sin BD, :8003) — *pendiente*
+### 5.4 MS4 Órdenes (Python + FastAPI, sin BD propia, :8003)
 
-Orquestador: valida usuario (MS1), consulta/reserva stock (MS2) y registra venta (MS3). Compensación: libera stock si falla el registro.
+Orquestador puro: la "orden" persistida es el documento `venta` que crea MS3; MS4 no guarda nada por su cuenta.
 
 ```http
-POST /ordenes/previsualizar
-POST /ordenes/confirmar
-GET  /ordenes/{id}/estado
-POST /ordenes/{id}/cancelar
+GET  /health
+POST /ordenes/previsualizar   # valida stock/precio contra MS2, sin reservar nada
+POST /ordenes/confirmar       # reserva stock (MS2) → crea venta "pendiente" (MS3) → confirma stock (MS2) → marca "confirmada"
+GET  /ordenes/{id}/estado     # proxy a GET MS3 /ventas/{id}
+POST /ordenes/{id}/cancelar   # solo si la venta sigue "pendiente"; libera el stock reservado
 ```
 
-### 5.5 MS5 Analítica (Python + Athena, :8001) — *pendiente*
+- Reenvía siempre el header `Authorization` del usuario original a MS2/MS3 (sin "service account" separado).
+- Compensación real: si falla una reserva a mitad de camino, libera las que sí se reservaron antes de responder 409.
+- **Limitación reconocida:** MS2 no expone un endpoint de reingreso de stock, así que una venta ya `confirmada` no se puede cancelar (409 explicando el motivo) — solo se puede cancelar mientras sigue `pendiente`.
+- Requiere `JWT_SECRET`, `CATALOGO_URL`, `VENTAS_URL`.
 
-Ejecuta consultas Athena y devuelve JSON. Usa credenciales del IAM Role (sin claves en código).
+### 5.5 MS5 Analítica (Python + FastAPI + Athena, :8001)
+
+Ejecuta consultas Athena y devuelve JSON. Usa `boto3` con las credenciales del IAM Role de la instancia (nunca claves en el código). Todas las rutas son **admin only**.
 
 ```http
+GET /health                       # no depende de Athena (para no tumbar el healthcheck del ALB)
+GET /health/athena                # opcional — valida credenciales AWS con sts:GetCallerIdentity
 GET /analitica/ticket-promedio
 GET /analitica/productos-mas-vendidos
 GET /analitica/ventas-por-categoria
@@ -225,6 +250,10 @@ GET /analitica/ventas-por-ciudad
 GET /analitica/calificacion-vs-ventas
 GET /analitica/clientes-frecuentes
 ```
+
+- SQL de cada endpoint: `Backend/analitica/app/routers/analitica.py`.
+- Requiere `JWT_SECRET`, `AWS_REGION`, `ATHENA_DATABASE`, `ATHENA_WORKGROUP`, `ATHENA_OUTPUT_S3`. Sin `ATHENA_OUTPUT_S3` responde `503` (no inventa datos).
+- **Dependencia real:** solo devuelve filas si S3 + Glue (§9) ya están poblados con `ordenes/ordenes.json`, `detalle_ordenes/detalle_ordenes.csv` y `resenas/resenas.json` — hoy esos 3 archivos se generan con `Data/scripts/src/scripts/faker_ventas_resenas.py` mas **deben subirse a S3 a mano** (`ingesta-ventas` sigue pendiente, ver §8).
 
 ### 5.6 Imágenes Docker (build → push → pull)
 
@@ -242,8 +271,27 @@ docker compose pull                        # descarga las imágenes
 docker compose up -d                       # levanta los contenedores
 ```
 
-- Las imágenes se alojan en Docker Hub con tags como `usuario/cloudshop-catalogo:latest`, `usuario/cloudshop-usuarios:latest`, etc.
-- El compose de producción usa `image:` (referencia a Docker Hub); el `build:` se usa solo en desarrollo.
+- Las imágenes se alojan en Docker Hub con tags como `usuario/cloudshop-catalogo:latest`, `usuario/cloudshop-usuarios:latest`, etc. — `Backend/docker-compose.yml` ya declara `image: ${DOCKERHUB_USER}/cloudshop-<servicio>:latest` en cada servicio (junto a su `build:`), así que `docker compose build && docker compose push` en un solo comando arma y sube las 5 imágenes.
+- El compose es el mismo archivo en dev y producción: en dev se usa `docker compose up -d --build`; en producción, `docker compose pull && docker compose up -d` (sin `--build`, así nunca compila en la VM de app).
+
+### 5.7 Roles de usuario (`usuario` / `admin`)
+
+No es un microservicio aparte: es un claim `rol` dentro del mismo JWT HS256 que ya emite MS1, verificado de forma independiente por cada lenguaje (Python, Go, Node) sin que MS2/MS3/MS4/MS5 necesiten consultar la base de usuarios.
+
+| Servicio | Cómo verifica el rol |
+|---|---|
+| MS1 (Python) | `python-jose` decodifica el JWT; dependencia `require_admin` en FastAPI |
+| MS2 (Go) | Verificación manual HS256 con la librería estándar (`Backend/products/auth.go`), sin dependencias nuevas |
+| MS3 (Node) | `jsonwebtoken` (`Backend/ventas-resenas/src/middleware/auth.js`) |
+| MS4/MS5 (Python) | Igual que MS1 pero sin consulta a base de datos (no tienen una) |
+
+**Bootstrap de administradores:** variable de entorno `ADMIN_EMAILS` en MS1 (coma-separado). No hace falta tocar la base de datos a mano: cualquier registro con un email de esa lista nace con `rol=admin`. Un admin ya existente puede promover a otros con `PATCH /usuarios/{id}/rol`.
+
+**Qué puede hacer un admin que un usuario normal no puede:**
+- Crear/editar/desactivar productos y categorías (MS2).
+- Ver y cambiar el rol/estado de cualquier usuario (MS1).
+- Ver todas las ventas del sistema, no solo las propias (MS3).
+- Consultar los 6 endpoints de analítica (MS5, admin-only en su totalidad).
 
 ---
 
@@ -255,12 +303,12 @@ Se montan con **contenedores Docker**, una **red Docker propia `red_bd`** y **vo
 |---|---|---|---|---|---|
 | MySQL 8.4 | `cloudshop-mysql` | 3306 | `cloudshop_catalogo` | `cloud_user` | `ingesta_my` |
 | PostgreSQL 16 | `cloudshop-postgres` | 5432 | `cloudshop_usuarios` | `cloud_user` | `ingesta_pg` |
-| MongoDB | `cloudshop-mongo` | 27017 | `cloudshop_ventas` | — *(pendiente)* | `ingesta_mongo` *(pendiente)* |
+| MongoDB | `cloudshop-mongo` | 27017 | `cloudshop_ventas` | sin auth (aislado por SG) | `ingesta_mongo` *(pendiente)* |
 
-- Esquema SQL inicial: `Backend/products/init.sql` (MySQL) y `Backend/postgres-init/01_esquema.sql` (PostgreSQL), montados en `docker-compose.datos.yml`.
-- Volúmenes: `mysql_data`, `pg_data` (y `mongo_data` para MongoDB).
-- MongoDB se agrega a la misma MV de datos (tercera MV del enunciado).
-- Carga de datos: `Data/scripts/src/scripts/load_csv_bd.py` (CSVs → MySQL/PostgreSQL).
+- Esquema SQL inicial: `Backend/products/init.sql` (MySQL) y `Backend/postgres-init/01_esquema.sql` (PostgreSQL, incluye la columna `rol`), montados en `docker-compose.datos.yml`. MongoDB no necesita esquema previo (Mongoose lo crea al primer insert).
+- Volúmenes: `mysql_data`, `pg_data`, `mongo_data`.
+- MongoDB corre en la misma MV de datos, ya agregada a `docker-compose.datos.yml`.
+- Carga de datos: `Data/scripts/src/scripts/load_csv_bd.py` (CSVs → MySQL/PostgreSQL, JSON+CSV → MongoDB). El generador de ventas/reseñas es `Data/scripts/src/scripts/faker_ventas_resenas.py` (ver `Data/scripts/README.md`); garantiza `orden_id` único globalmente (compatible con `ObjectId` de Mongo) y reseñas únicas por `(producto_id, usuario_id)`.
 
 > La MV de datos tiene IP pública solo para salida a internet (`docker pull`); su protección de entrada depende 100 % de `cloudshop-sg-bd`.
 
@@ -273,19 +321,18 @@ Se montan con **contenedores Docker**, una **red Docker propia `red_bd`** y **vo
 
 ```text
 s3://cloudshop-data-lake-2026-utec-mr-cs2032-v2/
-├── usuarios/
-│   ├── usuarios.csv
-│   └── direcciones_envio.csv
-├── catalogo/
-│   ├── categorias.csv
-│   ├── productos.csv
-│   ├── inventario.csv
-│   └── movimientos_stock.csv
-└── ventas/
-    ├── ordenes.json
-    ├── detalle_ordenes.csv
-    └── resenas.json
+├── usuarios/usuarios.csv
+├── direcciones_envio/direcciones_envio.csv
+├── categorias/categorias.csv
+├── productos/productos.csv
+├── inventario/inventario.csv
+├── movimientos_stock/movimientos_stock.csv
+├── ordenes/ordenes.json
+├── detalle_ordenes/detalle_ordenes.csv
+└── resenas/resenas.json
 ```
+
+> **Un prefijo por tabla, sin excepción.** Athena/Glue definen una tabla a partir de todos los objetos bajo un mismo prefijo; si dos archivos con columnas distintas compartieran carpeta, Athena mezclaría sus columnas en una sola tabla. Por eso cada archivo tiene su propia carpeta al mismo nivel (no agrupadas por microservicio de origen como en una versión anterior de este documento).
 
 ---
 
@@ -296,8 +343,8 @@ Tres contenedores Python con `boto3`, estrategia **pull del 100 %**, credenciale
 | Contenedor | Fuente | Tablas/colecciones | Archivos en S3 |
 |---|---|---|---|
 | `ingesta-usuarios` | PostgreSQL | `usuarios`, `direcciones_envio` | `usuarios/*.csv` |
-| `ingesta-catalogo` | MySQL | `categorias`, `productos`, `inventario`, `movimientos_stock` | `catalogo/*.csv` |
-| `ingesta-ventas` *(pendiente)* | MongoDB | `ordenes`, `resenas` | `ventas/ordenes.json`, `ventas/detalle_ordenes.csv`, `ventas/resenas.json` |
+| `ingesta-catalogo` | MySQL | `categorias`, `productos`, `inventario`, `movimientos_stock` | `categorias/`, `productos/`, `inventario/`, `movimientos_stock/` |
+| `ingesta-ventas` *(pendiente)* | MongoDB | `ordenes`, `resenas` | `ordenes/ordenes.json`, `detalle_ordenes/detalle_ordenes.csv`, `resenas/resenas.json` |
 
 ```bash
 cd /home/ubuntu/cloudshop/Ingesta
@@ -317,25 +364,24 @@ docker compose up --build
 | Tabla | Archivo S3 |
 |---|---|
 | `usuarios` | `usuarios/usuarios.csv` |
-| `direcciones_envio` | `usuarios/direcciones_envio.csv` |
-| `categorias` | `catalogo/categorias.csv` |
-| `productos` | `catalogo/productos.csv` |
-| `inventario` | `catalogo/inventario.csv` |
-| `movimientos_stock` | `catalogo/movimientos_stock.csv` |
-| `ordenes` | `ventas/ordenes.json` |
-| `detalle_ordenes` | `ventas/detalle_ordenes.csv` |
-| `resenas` | `ventas/resenas.json` |
+| `direcciones_envio` | `direcciones_envio/direcciones_envio.csv` |
+| `categorias` | `categorias/categorias.csv` |
+| `productos` | `productos/productos.csv` |
+| `inventario` | `inventario/inventario.csv` |
+| `movimientos_stock` | `movimientos_stock/movimientos_stock.csv` |
+| `ordenes` | `ordenes/ordenes.json` |
+| `detalle_ordenes` | `detalle_ordenes/detalle_ordenes.csv` |
+| `resenas` | `resenas/resenas.json` |
 
 Base de datos Glue: `cloudshop_analytics`.
 
 **Contrato de datos:** `usuario_id`/`producto_id`/`categoria_id` (`BIGINT`) consistentes entre motores; `orden_id` (`VARCHAR`); fechas ISO 8601.
 
-### Athena (4 consultas + 2 vistas)
+### Athena (6 consultas + 2 vistas)
 
-Consultas: ticket promedio por ciudad, productos/categorías con más ingresos, ventas por categoría y mes, calificación vs unidades vendidas.
-Vistas: `vw_detalle_ventas` y `vw_valor_cliente`.
+Las 6 consultas que expone MS5 (§5.5) + 2 vistas (`vw_detalle_ventas`, `vw_valor_cliente`) que las simplifican. SQL de referencia completo, ya adaptado a los nombres de columna reales (no al documento de sustentación original, que asumía un esquema ligeramente distinto): `DESPLIEGUE_AWS_MANUAL.md` §9, y las consultas ejecutables en `Backend/analitica/app/routers/analitica.py`.
 
-> SQL de referencia completo en `Proposal/02_Sustentacion_Data_Science_CloudShop.md` §8 y §9.
+> Las tablas se registran en Glue **creándolas desde el editor de consultas de Athena** (`CREATE EXTERNAL TABLE`), no con un Crawler — es más determinístico para CSV con comillas/comas embebidas (usa `OpenCSVSerde`) y para el NDJSON de ventas/reseñas (usa `JsonSerDe`). DDL exacto en `DESPLIEGUE_AWS_MANUAL.md` §8.
 
 ---
 
@@ -374,6 +420,8 @@ El frontend consume el **DNS del ALB** como única base URL (ej. `http://cloudsh
 ---
 
 ## 11. Catálogo centralizado de APIs (Swagger UI)
+
+> ⏳ **Pendiente:** los 5 archivos `docs/openapi/*.yaml` todavía no existen en el repo. Esta sección describe el diseño; el contenedor `swagger-ui` no se puede levantar hasta escribirlos (o se levanta vacío/con error de `SWAGGER_JSON_URL`). Cada servicio sí expone su propio Swagger nativo ya funcional donde aplica (FastAPI en `/docs` para MS1/MS4/MS5).
 
 Contenedor `swaggerapi/swagger-ui` que monta, en modo solo lectura, un volumen con las definiciones **OpenAPI (YAML)** de los 5 microservicios, para que todo el equipo consulte los contratos en un solo lugar.
 
@@ -426,7 +474,12 @@ VITE_USE_MOCKS=false
 VITE_API_BASE_URL=http://cloudshop-alb-1234.region.elb.amazonaws.com
 ```
 
-El frontend debe consumir los 5 microservicios (≥2 métodos REST de cada uno).
+El frontend consume los 5 microservicios (≥2 métodos REST de cada uno):
+- Panel `/admin` (solo visible/accesible con `rol=admin`): pestañas Productos, Categorías, Usuarios, Órdenes — CRUD contra MS1/MS2, lectura contra MS3.
+- Flujo de compra real en la ficha de producto: cantidad → `POST /ordenes/confirmar` (MS4) → stock actualizado.
+- Reseñas: lectura pública + publicación para usuarios autenticados (MS3).
+- "Mis compras" en el perfil: `GET /usuarios/{id}/ventas` (MS3).
+- Modo demo (`VITE_USE_MOCKS=true`, valor por defecto) simula los 5 servicios en memoria del navegador, sin backend — útil para Amplify si el ALB aún no está listo.
 
 ---
 
@@ -438,24 +491,30 @@ El frontend debe consumir los 5 microservicios (≥2 métodos REST de cada uno).
 |---|---|---|
 | `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD` | MV datos + MV app + loader | MySQL |
 | `PG_PASSWORD` | MV datos + MV app + loader | PostgreSQL |
-| `JWT_SECRET` | MV app (MS1) | string largo y aleatorio |
-| `CORS_ORIGINS` | MV app (MS1) | Amplify + `localhost:5173` |
+| `MONGO_URI` | MV app (MS3) + loader | incluye el nombre de la BD al final (`.../cloudshop_ventas`) |
+| `JWT_SECRET` | MV app (MS1 lo emite; MS2/MS3/MS4/MS5 lo verifican) | mismo valor en los 5 servicios |
+| `ADMIN_EMAILS` | MV app (MS1) | coma-separado; bootstrap de administradores |
+| `CORS_ORIGINS` | MV app (los 5 servicios) | Amplify + `localhost:5173` |
+| `DOCKERHUB_USER` | máquina de build (`docker compose build/push`) + MV app-1/app-2 (`docker compose pull`) | tu usuario de Docker Hub |
+| `AWS_REGION`, `ATHENA_DATABASE`, `ATHENA_WORKGROUP`, `ATHENA_OUTPUT_S3` | MV app (MS5) | ver §9 |
 | `ingesta_my` / `ingesta_pg` | MV datos (init) + MV ingesta | solo lectura |
 
 ### 13.2 Orden de construcción
 
 1. **Red**: VPC + subred pública + IGW + tabla de ruteo.
 2. **Security Groups**: `sg-app`, `sg-bd`, `sg-ingesta`, `sg-alb` (según §4).
-3. **MV datos**: instalar Docker, clonar repo, crear `.env`, `docker compose -f docker-compose.datos.yml up -d`, levantar MongoDB.
-4. **Carga de datos**: `load_csv_bd.py` (CSVs → MySQL/PostgreSQL).
-5. **MV ingesta**: clonar repo, configurar `.env` de ingesta, `docker compose up --build`.
-6. **Imágenes**: `docker compose build` + `docker compose push` (Docker Hub).
-7. **MV app-1 y app-2**: clonar repo, `.env` apuntando a `10.0.1.10`, `docker compose pull` + `docker compose up -d`.
+3. **MV datos**: instalar Docker, clonar repo, crear `.env`, `docker compose -f docker-compose.datos.yml up -d` (MySQL + PostgreSQL + MongoDB).
+4. **Carga de datos**: `Data/scripts` — `faker_ventas_resenas.py` genera ventas/reseñas, luego `load_csv_bd.py` (CSVs/JSON → MySQL + PostgreSQL + MongoDB).
+5. **MV ingesta**: clonar repo, configurar `.env` de `ingesta-usuarios`/`ingesta-catalogo`, `docker compose up --build` (`ingesta-ventas` sigue pendiente: subir los 3 archivos de ventas/reseñas a S3 a mano por ahora).
+6. **Imágenes**: `docker compose build` + `docker login` + `docker compose push` (Docker Hub) con `DOCKERHUB_USER` definido.
+7. **MV app-1 y app-2**: clonar repo, `.env` apuntando a `10.0.1.10` (incluye `JWT_SECRET`, `ADMIN_EMAILS`, `MONGO_URI`, `ATHENA_*`), `docker compose pull` + `docker compose up -d`.
 8. **ALB**: crear ALB + 5 target groups (registrar app-1 y app-2) + listener :80 con reglas por path.
-9. **S3 + Glue + Athena**: catálogo, 4 queries, 2 vistas.
-10. **Swagger UI**: subir `docs/openapi/*.yaml` y levantar el contenedor (§11).
+9. **S3 + Glue + Athena**: bucket, tablas vía `CREATE EXTERNAL TABLE` en Athena, 6 queries, 2 vistas.
+10. **Swagger UI**: pendiente hasta escribir `docs/openapi/*.yaml` (§11).
 11. **Amplify** (frontend) apuntando al DNS del ALB.
 
+> Guía **paso a paso, 100% consola de AWS Academy** (sin AWS CLI/PowerShell) para los pasos 1–9 y 11: `DESPLIEGUE_AWS_MANUAL.md`.
+>
 > Verificación por servicio: `curl http://localhost:<puerto>/health` en cada VM (8080, 8000, 8001, 8002, 8003).
 
 ---
@@ -465,11 +524,12 @@ El frontend debe consumir los 5 microservicios (≥2 métodos REST de cada uno).
 - [ ] `docker ps` en app-1 y app-2 mostrando los 5 microservicios (mismo `docker-compose.yml`).
 - [ ] Health checks del ALB en verde (target groups `healthy`).
 - [ ] URL pública del ALB (`http://...elb.amazonaws.com`) respondiendo por path.
-- [ ] Catálogo centralizado `swagger-ui` mostrando MS1–MS5 (definiciones OpenAPI en YAML).
-- [ ] ≥20,000 registros por motor: `usuarios` (20k), `movimientos_stock` (25k), `resenas`/`ordenes` (≥10k).
+- [ ] Roles funcionando: un usuario normal recibe 403 en `POST /api/catalogo/productos`; un admin (vía `ADMIN_EMAILS`) puede crear/editar/desactivar productos y categorías, y promover a otro usuario con `PATCH /usuarios/{id}/rol`.
+- [ ] Catálogo centralizado `swagger-ui` mostrando MS1–MS5 (definiciones OpenAPI en YAML) — **pendiente**, ver §11.
+- [ ] ≥20,000 registros por motor: `usuarios` (20k), `movimientos_stock` (25k), `ordenes`/`resenas` (≥12k cada uno, ver `Data/scripts/README.md`).
 - [ ] Security Groups prueban que las bases son privadas (puertos 3306/5432/27017 solo desde `sg-app`/`sg-ingesta`).
-- [ ] URL pública de Amplify consumiendo las 5 APIs (≥2 métodos REST por servicio).
-- [ ] Flujo de compra completo: login → catálogo → detalle → reservar → confirmar → auditar.
-- [ ] MV ingesta: 3 contenedores, archivos en S3, logs con conteo de filas.
-- [ ] Glue: 1 tabla por archivo; Athena: 4 consultas con joins + 2 vistas.
+- [ ] URL pública de Amplify consumiendo las 5 APIs (≥2 métodos REST por servicio), incluyendo el panel `/admin`.
+- [ ] Flujo de compra completo: login → catálogo → detalle → reservar/confirmar (MS4) → venta visible en "Mis compras" (MS3) → reseña (MS3).
+- [ ] MV ingesta: `ingesta-usuarios` e `ingesta-catalogo` corriendo, archivos en S3, logs con conteo de filas (`ingesta-ventas` es un gap conocido — archivos subidos a mano mientras tanto).
+- [ ] Glue: 1 tabla por archivo (9 tablas); Athena: 6 consultas (las de MS5) + 2 vistas.
 - [ ] Diagrama de arquitectura en draw.io (Backend + Frontend + Data Science).

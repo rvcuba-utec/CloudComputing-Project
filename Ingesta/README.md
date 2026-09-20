@@ -9,9 +9,11 @@ usa las credenciales de AWS del IAM Role de la EC2 (nunca claves en el código).
 
 | Contenedor | Fuente | Tablas | Archivos en S3 |
 |---|---|---|---|
-| `ingesta-usuarios` | PostgreSQL (`cloudshop_usuarios`) | `usuarios`, `direcciones_envio` | `usuarios/usuarios.csv`, `usuarios/direcciones_envio.csv` |
-| `ingesta-catalogo` | MySQL (`cloudshop_catalogo`) | `categorias`, `productos`, `inventario`, `movimientos_stock` | `catalogo/*.csv` |
-| `ingesta-ventas` *(pendiente)* | MongoDB | `ordenes`, `resenas` | `ventas/ordenes.json`, `ventas/detalle_ordenes.csv`, `ventas/resenas.json` |
+| `ingesta-usuarios` | PostgreSQL (`cloudshop_usuarios`) | `usuarios`, `direcciones_envio` | `usuarios/usuarios.csv`, `direcciones_envio/direcciones_envio.csv` |
+| `ingesta-catalogo` | MySQL (`cloudshop_catalogo`) | `categorias`, `productos`, `inventario`, `movimientos_stock` | `categorias/categorias.csv`, `productos/productos.csv`, `inventario/inventario.csv`, `movimientos_stock/movimientos_stock.csv` |
+| `ingesta-ventas` *(pendiente)* | MongoDB | `ordenes`, `resenas` | `ordenes/ordenes.json`, `detalle_ordenes/detalle_ordenes.csv`, `resenas/resenas.json` |
+
+> **Un prefijo de S3 por tabla, siempre.** Athena/Glue definen una tabla a partir de todos los archivos que comparten un prefijo; si dos archivos con columnas distintas compartieran carpeta (p. ej. `usuarios.csv` y `direcciones_envio.csv` en la misma `usuarios/`), Athena los leería como una sola tabla y mezclaría las columnas. Por eso cada archivo vive en su propia carpeta con el mismo nombre que la tabla.
 
 > Para este primer entregable solo existen los microservicios de Catálogo (MySQL) y
 > Usuarios (PostgreSQL). `ingesta-ventas` se incorpora cuando exista el microservicio
@@ -21,14 +23,15 @@ usa las credenciales de AWS del IAM Role de la EC2 (nunca claves en el código).
 
 ```text
 s3://cloudshop-data-lake-2026-utec-mr-cs2032-v2/
-├── usuarios/
-│   ├── usuarios.csv
-│   └── direcciones_envio.csv
-└── catalogo/
-    ├── categorias.csv
-    ├── productos.csv
-    ├── inventario.csv
-    └── movimientos_stock.csv
+├── usuarios/usuarios.csv
+├── direcciones_envio/direcciones_envio.csv
+├── categorias/categorias.csv
+├── productos/productos.csv
+├── inventario/inventario.csv
+├── movimientos_stock/movimientos_stock.csv
+├── ordenes/ordenes.json                 (ingesta-ventas, pendiente — subir a mano mientras tanto)
+├── detalle_ordenes/detalle_ordenes.csv  (idem)
+└── resenas/resenas.json                 (idem)
 ```
 
 ## Requisitos previos

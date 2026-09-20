@@ -22,10 +22,12 @@ POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
 
 S3_BUCKET = os.environ.get("S3_BUCKET", "cloudshop-data-lake-2026-utec-mr-cs2032-v2")
 
-# Plantilla: para agregar más tablas -> agregar otra entrada.
+# Cada tabla vive en su PROPIO prefijo de S3 (una carpeta = una tabla de Athena/Glue).
+# Si dos archivos con esquemas distintos compartieran prefijo, Athena los leería
+# como una sola tabla y mezclaría las columnas.
 EXTRACCIONES = {
     "usuarios": ("SELECT * FROM usuarios", "usuarios/usuarios.csv"),
-    "direcciones_envio": ("SELECT * FROM direcciones_envio", "usuarios/direcciones_envio.csv"),
+    "direcciones_envio": ("SELECT * FROM direcciones_envio", "direcciones_envio/direcciones_envio.csv"),
 }
 
 
