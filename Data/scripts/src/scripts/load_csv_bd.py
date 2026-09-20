@@ -1,4 +1,4 @@
-"""Carga los CSVs de Data/csv en las bases de datos operacionales.
+"""Carga los CSVs/JSON de Data/csv en las bases de datos operacionales.
 
 MySQL (cloudshop_catalogo):
     catalogo/categorias.csv → categorias
@@ -10,21 +10,31 @@ PostgreSQL (cloudshop_usuarios):
     usuarios.csv            → usuarios
     direcciones_envio.csv   → direcciones_envio
 
-La carga es COMPLETA (no incremental): limpia las tablas destino antes de
-insertar. Reusa las mismas variables del despliegue (Backend/.env.example):
-MYSQL_* para MySQL y DATABASE_URL para PostgreSQL.
+MongoDB (cloudshop_ventas, MS3 Ventas y Reseñas):
+    ventas/ordenes.json + ventas/detalle_ordenes.csv → colección `ventas`
+        (se combinan: cada línea de detalle_ordenes.csv se anida como un
+        elemento de `items` dentro del pedido con el mismo orden_id)
+    ventas/resenas.json                              → colección `resenas`
+
+La carga es COMPLETA (no incremental): limpia las colecciones/tablas destino
+antes de insertar. Reusa las mismas variables del despliegue
+(Backend/.env.example): MYSQL_* para MySQL, DATABASE_URL para PostgreSQL,
+MONGO_URI para MongoDB.
 
 Uso (dentro de Data/scripts/):
-    uv run python -m scripts.load_csv_bd --dry-run     # solo valida CSVs
-    uv run python -m scripts.load_csv_bd               # carga ambas BDs
+    uv run python -m scripts.load_csv_bd --dry-run     # solo valida los archivos
+    uv run python -m scripts.load_csv_bd               # carga las 3 bases de datos
     uv run python -m scripts.load_csv_bd --solo-mysql --movimientos 25000
     uv run python -m scripts.load_csv_bd --solo-postgres
+    uv run python -m scripts.load_csv_bd --solo-mongo
 """
 
 import argparse
 import csv
+import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -37,6 +47,9 @@ PRODUCTOS_CSV = CSV_DIR / "catalogo" / "productos.csv"
 INVENTARIO_CSV = CSV_DIR / "catalogo" / "inventario.csv"
 USUARIOS_CSV = CSV_DIR / "usuarios.csv"
 DIRECCIONES_CSV = CSV_DIR / "direcciones_envio.csv"
+ORDENES_JSON = CSV_DIR / "ventas" / "ordenes.json"
+DETALLE_ORDENES_CSV = CSV_DIR / "ventas" / "detalle_ordenes.csv"
+RESENAS_JSON = CSV_DIR / "ventas" / "resenas.json"
 
 
 def leer_filas(ruta: Path) -> list[dict]:
@@ -46,6 +59,13 @@ def leer_filas(ruta: Path) -> list[dict]:
         return list(csv.DictReader(f))
 
 
+def leer_ndjson(ruta: Path) -> list[dict]:
+    if not ruta.exists():
+        raise SystemExit(f"Falta {ruta}. Genera primero las ventas/reseñas (faker_ventas_resenas.py).")
+    with ruta.open(encoding="utf-8") as f:
+        return [json.loads(linea) for linea in f if linea.strip()]
+
+
 def nulo_si_vacio(valor: str | None):
     if valor is None:
         return None
@@ -53,7 +73,8 @@ def nulo_si_vacio(valor: str | None):
     return valor if valor else None
 
 
-def validar(filas_categorias, filas_productos, filas_inventario, filas_usuarios, filas_direcciones):
+def validar(filas_categorias, filas_productos, filas_inventario, filas_usuarios, filas_direcciones,
+            filas_ordenes, filas_detalle, filas_resenas):
     ids_categorias = {int(r["id"]) for r in filas_categorias}
     ids_productos = {int(r["id"]) for r in filas_productos}
     ids_usuarios = {int(r["id"]) for r in filas_usuarios}
@@ -68,6 +89,38 @@ def validar(filas_categorias, filas_productos, filas_inventario, filas_usuarios,
     sin_usuario = [int(r["usuario_id"]) for r in filas_direcciones if int(r["usuario_id"]) not in ids_usuarios]
     if sin_usuario:
         problemas.append(f"{len(sin_usuario)} direcciones con usuario_id inexistente (ej. {sin_usuario[0]})")
+
+    # --- Ventas y reseñas (MongoDB) ---
+    ids_ordenes = [r["orden_id"] for r in filas_ordenes]
+    ids_ordenes_unicos = set(ids_ordenes)
+    if len(ids_ordenes) != len(ids_ordenes_unicos):
+        problemas.append(
+            f"orden_id duplicado: {len(ids_ordenes) - len(ids_ordenes_unicos)} pedidos repiten el mismo "
+            "código de orden (dos usuarios NO pueden compartir un orden_id)"
+        )
+    sin_usuario_orden = [r["orden_id"] for r in filas_ordenes if int(r["usuario_id"]) not in ids_usuarios]
+    if sin_usuario_orden:
+        problemas.append(f"{len(sin_usuario_orden)} órdenes con usuario_id inexistente (ej. {sin_usuario_orden[0]})")
+    sin_orden = [r["orden_id"] for r in filas_detalle if r["orden_id"] not in ids_ordenes_unicos]
+    if sin_orden:
+        problemas.append(f"{len(sin_orden)} líneas de detalle_ordenes con orden_id inexistente (ej. {sin_orden[0]})")
+    sin_producto_detalle = [r["orden_id"] for r in filas_detalle if int(r["producto_id"]) not in ids_productos]
+    if sin_producto_detalle:
+        problemas.append(f"{len(sin_producto_detalle)} líneas de detalle_ordenes con producto_id inexistente")
+    sin_usuario_resena = [
+        (r["usuario_id"], r["producto_id"]) for r in filas_resenas if int(r["usuario_id"]) not in ids_usuarios
+    ]
+    if sin_usuario_resena:
+        problemas.append(f"{len(sin_usuario_resena)} reseñas con usuario_id inexistente")
+    sin_producto_resena = [
+        (r["usuario_id"], r["producto_id"]) for r in filas_resenas if int(r["producto_id"]) not in ids_productos
+    ]
+    if sin_producto_resena:
+        problemas.append(f"{len(sin_producto_resena)} reseñas con producto_id inexistente")
+    pares_resena = [(r["producto_id"], r["usuario_id"]) for r in filas_resenas]
+    if len(pares_resena) != len(set(pares_resena)):
+        problemas.append("hay reseñas duplicadas para el mismo par (producto_id, usuario_id)")
+
     return problemas
 
 
@@ -193,13 +246,76 @@ def cargar_postgres(filas_usuarios, filas_direcciones):
     print(f"[postgres] usuarios={len(filas_usuarios)}, direcciones={len(filas_direcciones)}")
 
 
+def cargar_mongo(filas_ordenes, filas_detalle, filas_resenas):
+    """Carga la colección `ventas` (pedido + items anidados) y `resenas` en MongoDB.
+
+    El `orden_id` generado por faker_ventas_resenas.py es un string hex de 24
+    caracteres, así que se usa directamente como `_id` (ObjectId) del pedido:
+    las rutas de MS3 que validan el id con ObjectId.isValid() siguen
+    funcionando igual con estos datos sembrados que con pedidos creados en vivo.
+    """
+    import pymongo
+    from bson import ObjectId
+
+    uri = os.getenv("MONGO_URI")
+    if not uri:
+        raise SystemExit("Falta MONGO_URI en el entorno (copia Backend/.env.example a Data/scripts/.env).")
+
+    detalle_por_orden: dict[str, list[dict]] = {}
+    for r in filas_detalle:
+        detalle_por_orden.setdefault(r["orden_id"], []).append({
+            "producto_id": int(r["producto_id"]),
+            "cantidad": int(r["cantidad"]),
+            "precio_unitario": float(r["precio_unitario"]),
+        })
+
+    documentos_ventas = [
+        {
+            "_id": ObjectId(r["orden_id"]),
+            "usuario_id": int(r["usuario_id"]),
+            "items": detalle_por_orden.get(r["orden_id"], []),
+            "total": float(r["total"]),
+            "estado": r["estado"],
+            "direccion_envio": r.get("direccion_envio", ""),
+            "creado_en": datetime.fromisoformat(r["creado_en"]),
+            "actualizado_en": datetime.fromisoformat(r["creado_en"]),
+        }
+        for r in filas_ordenes
+    ]
+
+    documentos_resenas = [
+        {
+            "producto_id": int(r["producto_id"]),
+            "usuario_id": int(r["usuario_id"]),
+            "calificacion": int(r["calificacion"]),
+            "comentario": r.get("comentario", ""),
+            "creado_en": datetime.fromisoformat(r["creado_en"]),
+        }
+        for r in filas_resenas
+    ]
+
+    cliente = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5000)
+    try:
+        bd = cliente.get_default_database()
+        bd.ventas.delete_many({})
+        bd.resenas.delete_many({})
+        if documentos_ventas:
+            bd.ventas.insert_many(documentos_ventas, ordered=False)
+        if documentos_resenas:
+            bd.resenas.insert_many(documentos_resenas, ordered=False)
+        print(f"[mongo] ventas={len(documentos_ventas)}, resenas={len(documentos_resenas)}")
+    finally:
+        cliente.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--solo-mysql", action="store_true", help="Carga únicamente el catálogo en MySQL")
     parser.add_argument("--solo-postgres", action="store_true", help="Carga únicamente usuarios/direcciones en PostgreSQL")
+    parser.add_argument("--solo-mongo", action="store_true", help="Carga únicamente ventas/reseñas en MongoDB")
     parser.add_argument("--movimientos", type=int, default=25000, metavar="N",
                         help="Filas de movimientos_stock vía procedimiento almacenado (0 = omitir)")
-    parser.add_argument("--dry-run", action="store_true", help="Lee y valida los CSVs sin conectarse a las BDs")
+    parser.add_argument("--dry-run", action="store_true", help="Lee y valida los CSVs/JSON sin conectarse a las BDs")
     args = parser.parse_args()
 
     filas_categorias = leer_filas(CATEGORIAS_CSV)
@@ -208,16 +324,27 @@ def main():
     filas_usuarios = leer_filas(USUARIOS_CSV)
     filas_direcciones = leer_filas(DIRECCIONES_CSV)
 
-    print(f"CSVs leídos: categorias={len(filas_categorias)}, productos={len(filas_productos)}, "
-          f"inventario={len(filas_inventario)}, usuarios={len(filas_usuarios)}, "
-          f"direcciones={len(filas_direcciones)}")
+    # Solo se exigen si de verdad se va a tocar Mongo: así --solo-mysql/--solo-postgres
+    # siguen funcionando aunque faker_ventas_resenas.py todavía no se haya corrido.
+    necesita_mongo = not (args.solo_mysql or args.solo_postgres)
+    filas_ordenes = leer_ndjson(ORDENES_JSON) if necesita_mongo else []
+    filas_detalle = leer_filas(DETALLE_ORDENES_CSV) if necesita_mongo else []
+    filas_resenas = leer_ndjson(RESENAS_JSON) if necesita_mongo else []
 
-    problemas = validar(filas_categorias, filas_productos, filas_inventario, filas_usuarios, filas_direcciones)
+    print(f"Archivos leídos: categorias={len(filas_categorias)}, productos={len(filas_productos)}, "
+          f"inventario={len(filas_inventario)}, usuarios={len(filas_usuarios)}, "
+          f"direcciones={len(filas_direcciones)}, ordenes={len(filas_ordenes)}, "
+          f"detalle_ordenes={len(filas_detalle)}, resenas={len(filas_resenas)}")
+
+    problemas = validar(filas_categorias, filas_productos, filas_inventario, filas_usuarios, filas_direcciones,
+                         filas_ordenes, filas_detalle, filas_resenas)
     if problemas:
         for p in problemas:
             print(f"[ERROR] {p}", file=sys.stderr)
-        raise SystemExit("Integridad referencial de los CSVs rota; regenera con faker_users.py / build_catalogo.py")
-    print("Integridad referencial de los CSVs: OK")
+        raise SystemExit(
+            "Integridad referencial rota; regenera con faker_users.py / build_catalogo.py / faker_ventas_resenas.py"
+        )
+    print("Integridad referencial: OK")
 
     if args.dry_run:
         print("--dry-run: sin conexión a las bases de datos. Nada más que hacer.")
@@ -231,12 +358,16 @@ def main():
     if args.solo_mysql:
         cargar_mysql(filas_categorias, filas_productos, filas_inventario, args.movimientos)
         return
+    if args.solo_mongo:
+        cargar_mongo(filas_ordenes, filas_detalle, filas_resenas)
+        return
 
     cargar_mysql(filas_categorias, filas_productos, filas_inventario, args.movimientos)
     cargar_postgres(filas_usuarios, filas_direcciones)
+    cargar_mongo(filas_ordenes, filas_detalle, filas_resenas)
     print("\nCarga completa. Verifica con: "
           "docker exec cloudshop-mysql mysql -u$MYSQL_USER -p -e 'SELECT COUNT(*) FROM cloudshop_catalogo.productos' "
-          "y análogamente en PostgreSQL.")
+          "y análogamente en PostgreSQL/Mongo.")
 
 
 if __name__ == "__main__":
