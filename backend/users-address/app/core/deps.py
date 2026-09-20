@@ -49,3 +49,13 @@ def get_current_user(
         )
 
     return usuario
+
+
+def require_admin(current: Usuario = Depends(get_current_user)) -> Usuario:
+    """Exige que el usuario autenticado tenga rol ``admin``; lanza 403 si no."""
+    if current.rol != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta acción requiere permisos de administrador.",
+        )
+    return current

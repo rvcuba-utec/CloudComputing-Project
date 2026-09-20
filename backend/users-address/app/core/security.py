@@ -21,10 +21,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def create_access_token(user_id: int) -> str:
-    """Genera un token JWT firmado con HS256 y ``sub`` igual al id del usuario."""
+def create_access_token(user_id: int, rol: str) -> str:
+    """Genera un token JWT firmado con HS256, con ``sub`` y ``rol`` del usuario.
+
+    El claim ``rol`` permite que MS2/MS3/MS4 (Go/Node/Python) autoricen por rol sin
+    consultar esta base de datos.
+    """
     expira = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
-    payload = {"sub": str(user_id), "exp": expira}
+    payload = {"sub": str(user_id), "rol": rol, "exp": expira}
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 

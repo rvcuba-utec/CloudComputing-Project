@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..core.security import create_access_token, hash_password, verify_password
 from ..database import get_db
 from ..models import Usuario
@@ -25,16 +26,18 @@ def register(payload: UsuarioCreate, db: Session = Depends(get_db)):
             detail="Ya existe una cuenta con ese correo electrónico.",
         )
 
+    rol = "admin" if payload.email.lower() in settings.admin_emails_list else "usuario"
     usuario = Usuario(
         nombre=payload.nombre,
         email=payload.email,
         password_hash=hash_password(payload.password),
+        rol=rol,
     )
     db.add(usuario)
     db.commit()
     db.refresh(usuario)
 
-    token = create_access_token(usuario.id)
+    token = create_access_token(usuario.id, usuario.rol)
     return UsuarioConToken(user=UsuarioOut.model_validate(usuario), access_token=token)
 
 
@@ -51,5 +54,5 @@ def login(payload: UsuarioLogin, db: Session = Depends(get_db)):
             detail="Correo o contraseña incorrectos.",
         )
 
-    token = create_access_token(usuario.id)
+    token = create_access_token(usuario.id, usuario.rol)
     return UsuarioConToken(user=UsuarioOut.model_validate(usuario), access_token=token)

@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Orígenes permitidos para CORS, separados por coma.
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # Correos que reciben el rol "admin" automáticamente al registrarse (separados por
+    # coma). Bootstrap sin tocar la base de datos a mano; vacío por defecto.
+    ADMIN_EMAILS: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -36,6 +40,11 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         """Devuelve los orígenes CORS como una lista limpia."""
         return [origen.strip() for origen in self.CORS_ORIGINS.split(",") if origen.strip()]
+
+    @property
+    def admin_emails_list(self) -> list[str]:
+        """Devuelve los correos de bootstrap de administradores, en minúsculas."""
+        return [correo.strip().lower() for correo in self.ADMIN_EMAILS.split(",") if correo.strip()]
 
 
 settings = Settings()

@@ -25,6 +25,7 @@ type config struct {
 	MySQLPassword string
 	MySQLDatabase string
 	ServerPort    string
+	JWTSecret     string
 }
 
 func envOrDefault(key, fallback string) string {
@@ -42,6 +43,7 @@ func loadConfig() config {
 		MySQLPassword: envOrDefault("MYSQL_PASSWORD", "cloud_pass"),
 		MySQLDatabase: envOrDefault("MYSQL_DATABASE", "cloudshop_catalogo"),
 		ServerPort:    envOrDefault("PORT", "8080"),
+		JWTSecret:     envOrDefault("JWT_SECRET", ""),
 	}
 }
 
@@ -120,6 +122,37 @@ type MovimientoStock struct {
 type MovimientoRequest struct {
 	ProductoID int64 `json:"producto_id"`
 	Cantidad   int64 `json:"cantidad"`
+}
+
+type ProductoCreateRequest struct {
+	CategoriaID     int64   `json:"categoria_id" binding:"required"`
+	SKU             string  `json:"sku" binding:"required"`
+	Nombre          string  `json:"nombre" binding:"required"`
+	Descripcion     string  `json:"descripcion"`
+	Marca           string  `json:"marca"`
+	ImagenURL       string  `json:"imagen_url"`
+	OrigenURL       string  `json:"origen_url"`
+	Precio          float64 `json:"precio" binding:"required"`
+	PrecioOferta    float64 `json:"precio_oferta"`
+	Activo          *bool   `json:"activo"`
+	StockDisponible int64   `json:"stock_disponible"`
+}
+
+type ProductoUpdateRequest struct {
+	CategoriaID  *int64   `json:"categoria_id"`
+	Nombre       *string  `json:"nombre"`
+	Descripcion  *string  `json:"descripcion"`
+	Marca        *string  `json:"marca"`
+	ImagenURL    *string  `json:"imagen_url"`
+	OrigenURL    *string  `json:"origen_url"`
+	Precio       *float64 `json:"precio"`
+	PrecioOferta *float64 `json:"precio_oferta"`
+	Activo       *bool    `json:"activo"`
+}
+
+type CategoriaRequest struct {
+	Nombre      string `json:"nombre" binding:"required"`
+	Descripcion string `json:"descripcion"`
 }
 
 const (
@@ -450,6 +483,269 @@ func existeProducto(ctx context.Context, consultador consultadorDeFilas, id int6
 	return total == 1, nil
 }
 
+func handleCrearProducto(c *gin.Context) {
+	var req ProductoCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		responderError(c, http.StatusBadRequest, "REQUEST_INVALIDA",
+			"Cuerpo JSON inválido: se requieren 'categoria_id', 'sku', 'nombre' y 'precio'")
+		return
+	}
+	activo := true
+	if req.Activo != nil {
+		activo = *req.Activo
+	}
+
+	ctx := c.Request.Context()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		errorInterno(c, "iniciar transacción", err)
+		return
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("[tx] error al hacer rollback: %v", err)
+		}
+	}()
+
+	resultado, err := tx.ExecContext(ctx, `
+		INSERT INTO productos (categoria_id, sku, nombre, descripcion, marca, imagen_url, origen_url, precio, precio_oferta, activo)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.CategoriaID, req.SKU, req.Nombre, req.Descripcion, req.Marca, req.ImagenURL, req.OrigenURL, req.Precio, req.PrecioOferta, activo)
+	if err != nil {
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			responderError(c, http.StatusConflict, "SKU_DUPLICADO", fmt.Sprintf("Ya existe un producto con el sku '%s'", req.SKU))
+			return
+		}
+		errorInterno(c, "crear producto", err)
+		return
+	}
+	nuevoID, err := resultado.LastInsertId()
+	if err != nil {
+		errorInterno(c, "obtener id del producto creado", err)
+		return
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO inventario (producto_id, stock_disponible, stock_reservado)
+		VALUES (?, ?, 0)`, nuevoID, req.StockDisponible); err != nil {
+		errorInterno(c, "crear inventario inicial", err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		errorInterno(c, "confirmar transacción", err)
+		return
+	}
+
+	producto, err := escanearProducto(db.QueryRowContext(ctx, consultaBaseProductos+" WHERE p.id = ?", nuevoID))
+	if err != nil {
+		errorInterno(c, "consultar producto recién creado", err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"data": producto})
+}
+
+func handleActualizarProducto(c *gin.Context) {
+	idCrudo := c.Param("id")
+	id, err := strconv.ParseInt(idCrudo, 10, 64)
+	if err != nil || id < 1 {
+		responderError(c, http.StatusBadRequest, "PARAMETRO_INVALIDO",
+			fmt.Sprintf("El valor '%s' no es un identificador de producto válido", idCrudo))
+		return
+	}
+
+	var req ProductoUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		responderError(c, http.StatusBadRequest, "REQUEST_INVALIDA", "Cuerpo JSON inválido")
+		return
+	}
+
+	ctx := c.Request.Context()
+	existe, err := existeProducto(ctx, db, id)
+	if err != nil {
+		errorInterno(c, "verificar existencia del producto", err)
+		return
+	}
+	if !existe {
+		responderError(c, http.StatusNotFound, "PRODUCTO_NO_ENCONTRADO", fmt.Sprintf("No existe el producto con id %d", id))
+		return
+	}
+
+	campos := make([]string, 0, 8)
+	args := make([]any, 0, 8)
+	agregar := func(columna string, valor any) { campos = append(campos, columna+" = ?"); args = append(args, valor) }
+
+	if req.CategoriaID != nil {
+		agregar("categoria_id", *req.CategoriaID)
+	}
+	if req.Nombre != nil {
+		agregar("nombre", *req.Nombre)
+	}
+	if req.Descripcion != nil {
+		agregar("descripcion", *req.Descripcion)
+	}
+	if req.Marca != nil {
+		agregar("marca", *req.Marca)
+	}
+	if req.ImagenURL != nil {
+		agregar("imagen_url", *req.ImagenURL)
+	}
+	if req.OrigenURL != nil {
+		agregar("origen_url", *req.OrigenURL)
+	}
+	if req.Precio != nil {
+		agregar("precio", *req.Precio)
+	}
+	if req.PrecioOferta != nil {
+		agregar("precio_oferta", *req.PrecioOferta)
+	}
+	if req.Activo != nil {
+		agregar("activo", *req.Activo)
+	}
+
+	if len(campos) == 0 {
+		responderError(c, http.StatusUnprocessableEntity, "SIN_CAMBIOS", "Debes enviar al menos un campo para actualizar")
+		return
+	}
+
+	args = append(args, id)
+	consulta := "UPDATE productos SET " + strings.Join(campos, ", ") + " WHERE id = ?"
+	if _, err := db.ExecContext(ctx, consulta, args...); err != nil {
+		errorInterno(c, "actualizar producto", err)
+		return
+	}
+
+	producto, err := escanearProducto(db.QueryRowContext(ctx, consultaBaseProductos+" WHERE p.id = ?", id))
+	if err != nil {
+		errorInterno(c, "consultar producto actualizado", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": producto})
+}
+
+// handleEliminarProducto hace un borrado lógico (activo = 0) en vez de borrar la fila:
+// movimientos_stock y las ventas registradas en MS3 referencian producto_id sin llave
+// foránea entre microservicios, así que un DELETE físico rompería ese historial.
+func handleEliminarProducto(c *gin.Context) {
+	idCrudo := c.Param("id")
+	id, err := strconv.ParseInt(idCrudo, 10, 64)
+	if err != nil || id < 1 {
+		responderError(c, http.StatusBadRequest, "PARAMETRO_INVALIDO",
+			fmt.Sprintf("El valor '%s' no es un identificador de producto válido", idCrudo))
+		return
+	}
+
+	resultado, err := db.ExecContext(c.Request.Context(), "UPDATE productos SET activo = 0 WHERE id = ?", id)
+	if err != nil {
+		errorInterno(c, "desactivar producto", err)
+		return
+	}
+	filas, err := resultado.RowsAffected()
+	if err != nil {
+		errorInterno(c, "desactivar producto", err)
+		return
+	}
+	if filas == 0 {
+		responderError(c, http.StatusNotFound, "PRODUCTO_NO_ENCONTRADO", fmt.Sprintf("No existe el producto con id %d", id))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Producto desactivado correctamente"})
+}
+
+func handleCrearCategoria(c *gin.Context) {
+	var req CategoriaRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		responderError(c, http.StatusBadRequest, "REQUEST_INVALIDA", "Cuerpo JSON inválido: se requiere 'nombre'")
+		return
+	}
+
+	resultado, err := db.ExecContext(c.Request.Context(),
+		"INSERT INTO categorias (nombre, descripcion) VALUES (?, ?)", req.Nombre, req.Descripcion)
+	if err != nil {
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			responderError(c, http.StatusConflict, "CATEGORIA_DUPLICADA", fmt.Sprintf("Ya existe una categoría llamada '%s'", req.Nombre))
+			return
+		}
+		errorInterno(c, "crear categoria", err)
+		return
+	}
+	nuevoID, err := resultado.LastInsertId()
+	if err != nil {
+		errorInterno(c, "obtener id de la categoria creada", err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"data": Categoria{ID: nuevoID, Nombre: req.Nombre, Descripcion: req.Descripcion}})
+}
+
+func handleActualizarCategoria(c *gin.Context) {
+	idCrudo := c.Param("id")
+	id, err := strconv.ParseInt(idCrudo, 10, 64)
+	if err != nil || id < 1 {
+		responderError(c, http.StatusBadRequest, "PARAMETRO_INVALIDO",
+			fmt.Sprintf("El valor '%s' no es un identificador de categoría válido", idCrudo))
+		return
+	}
+
+	var req CategoriaRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		responderError(c, http.StatusBadRequest, "REQUEST_INVALIDA", "Cuerpo JSON inválido: se requiere 'nombre'")
+		return
+	}
+
+	resultado, err := db.ExecContext(c.Request.Context(),
+		"UPDATE categorias SET nombre = ?, descripcion = ? WHERE id = ?", req.Nombre, req.Descripcion, id)
+	if err != nil {
+		errorInterno(c, "actualizar categoria", err)
+		return
+	}
+	filas, err := resultado.RowsAffected()
+	if err != nil {
+		errorInterno(c, "actualizar categoria", err)
+		return
+	}
+	if filas == 0 {
+		responderError(c, http.StatusNotFound, "CATEGORIA_NO_ENCONTRADA", fmt.Sprintf("No existe la categoría con id %d", id))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": Categoria{ID: id, Nombre: req.Nombre, Descripcion: req.Descripcion}})
+}
+
+func handleEliminarCategoria(c *gin.Context) {
+	idCrudo := c.Param("id")
+	id, err := strconv.ParseInt(idCrudo, 10, 64)
+	if err != nil || id < 1 {
+		responderError(c, http.StatusBadRequest, "PARAMETRO_INVALIDO",
+			fmt.Sprintf("El valor '%s' no es un identificador de categoría válido", idCrudo))
+		return
+	}
+
+	resultado, err := db.ExecContext(c.Request.Context(), "DELETE FROM categorias WHERE id = ?", id)
+	if err != nil {
+		if strings.Contains(err.Error(), "a foreign key constraint fails") {
+			responderError(c, http.StatusConflict, "CATEGORIA_EN_USO", "No se puede eliminar: hay productos asignados a esta categoría")
+			return
+		}
+		errorInterno(c, "eliminar categoria", err)
+		return
+	}
+	filas, err := resultado.RowsAffected()
+	if err != nil {
+		errorInterno(c, "eliminar categoria", err)
+		return
+	}
+	if filas == 0 {
+		responderError(c, http.StatusNotFound, "CATEGORIA_NO_ENCONTRADA", fmt.Sprintf("No existe la categoría con id %d", id))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Categoría eliminada correctamente"})
+}
+
 func handleMovimientoStock(tipo string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req MovimientoRequest
@@ -599,7 +895,7 @@ func corsMiddleware() gin.HandlerFunc {
 	}
 }
 
-func configurarRutas() *gin.Engine {
+func configurarRutas(jwtSecret string) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), corsMiddleware())
 
@@ -607,13 +903,25 @@ func configurarRutas() *gin.Engine {
 
 	api := router.Group("/api/catalogo")
 	{
+		// Lectura: pública, sin autenticación (catálogo visible para cualquier visitante).
 		api.GET("/categorias", handleListarCategorias)
 		api.GET("/productos", handleListarProductos)
 		api.GET("/productos/:id", handleObtenerProducto)
 		api.GET("/productos/:id/movimientos", handleMovimientosProducto)
-		api.POST("/inventario/reservar", handleMovimientoStock(tipoReserva))
-		api.POST("/inventario/liberar", handleMovimientoStock(tipoLiberacion))
-		api.POST("/inventario/confirmar-venta", handleMovimientoStock(tipoVentaConfirmada))
+
+		// Inventario: requiere sesión (lo usan los usuarios autenticados a través de MS4
+		// durante el flujo de compra).
+		api.POST("/inventario/reservar", requireAuth(jwtSecret), handleMovimientoStock(tipoReserva))
+		api.POST("/inventario/liberar", requireAuth(jwtSecret), handleMovimientoStock(tipoLiberacion))
+		api.POST("/inventario/confirmar-venta", requireAuth(jwtSecret), handleMovimientoStock(tipoVentaConfirmada))
+
+		// Escritura sobre el catálogo: solo administradores.
+		api.POST("/productos", requireAdmin(jwtSecret), handleCrearProducto)
+		api.PATCH("/productos/:id", requireAdmin(jwtSecret), handleActualizarProducto)
+		api.DELETE("/productos/:id", requireAdmin(jwtSecret), handleEliminarProducto)
+		api.POST("/categorias", requireAdmin(jwtSecret), handleCrearCategoria)
+		api.PATCH("/categorias/:id", requireAdmin(jwtSecret), handleActualizarCategoria)
+		api.DELETE("/categorias/:id", requireAdmin(jwtSecret), handleEliminarCategoria)
 	}
 
 	return router
@@ -634,9 +942,13 @@ func main() {
 	defer db.Close()
 	log.Printf("[main] conexión a MySQL establecida (%s:%s/%s)", cfg.MySQLHost, cfg.MySQLPort, cfg.MySQLDatabase)
 
+	if strings.TrimSpace(cfg.JWTSecret) == "" {
+		log.Fatal("[main] falta definir JWT_SECRET (debe ser el mismo secreto que usa el microservicio de usuarios)")
+	}
+
 	servidor := &http.Server{
 		Addr:         ":" + cfg.ServerPort,
-		Handler:      configurarRutas(),
+		Handler:      configurarRutas(cfg.JWTSecret),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

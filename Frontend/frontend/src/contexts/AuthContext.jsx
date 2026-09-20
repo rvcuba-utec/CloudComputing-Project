@@ -10,5 +10,6 @@ export function AuthProvider({ children }) {
     setUser(result.user);
   }
   function logout() { setUser(null); setToken(null); }
-  return <AuthContext.Provider value={{ user, setUser, authenticate, logout }}>{children}</AuthContext.Provider>;
+  const isAdmin = user?.rol === 'admin';
+  return <AuthContext.Provider value={{ user, setUser, authenticate, logout, isAdmin }}>{children}</AuthContext.Provider>;
 }

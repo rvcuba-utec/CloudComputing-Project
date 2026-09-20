@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     email          VARCHAR(180)  NOT NULL,
     password_hash  VARCHAR(255)  NOT NULL,
     estado         VARCHAR(20)   NOT NULL DEFAULT 'activo',
+    rol            VARCHAR(20)   NOT NULL DEFAULT 'usuario' CHECK (rol IN ('usuario', 'admin')),
     creado_en      TIMESTAMPTZ   NOT NULL DEFAULT now(),
     actualizado_en TIMESTAMPTZ
 );

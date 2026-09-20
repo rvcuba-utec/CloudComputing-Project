@@ -19,6 +19,7 @@ class Usuario(Base):
     email = Column(String(180), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     estado = Column(String(20), nullable=False, server_default="activo")
+    rol = Column(String(20), nullable=False, server_default="usuario")
     # timezone=True para que la ingesta no tenga problemas de zona horaria.
     creado_en = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     actualizado_en = Column(DateTime(timezone=True), onupdate=func.now())

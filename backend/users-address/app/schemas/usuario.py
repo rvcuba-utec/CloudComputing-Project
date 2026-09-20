@@ -24,11 +24,16 @@ class UsuarioUpdate(BaseModel):
     estado: Optional[Literal["activo", "inactivo"]] = None
 
 
+class UsuarioRolUpdate(BaseModel):
+    rol: Literal["usuario", "admin"]
+
+
 class UsuarioOut(BaseModel):
     id: int
     nombre: str
     email: EmailStr
     estado: str
+    rol: str
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -36,3 +41,10 @@ class UsuarioOut(BaseModel):
 class UsuarioConToken(BaseModel):
     user: UsuarioOut
     access_token: str
+
+
+class UsuarioListOut(BaseModel):
+    data: list[UsuarioOut]
+    total: int
+    page: int
+    limit: int

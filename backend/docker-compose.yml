@@ -1,4 +1,4 @@
-# VM de desarrollo/aplicación: los dos microservicios.
+# VM de desarrollo/aplicación: los cinco microservicios.
 # Las bases de datos NO viven aquí: corren en la VM de datos
 # (Backend/docker-compose.datos.yml) y se alcanzan por IP privada.
 #
@@ -17,6 +17,7 @@ services:
       MYSQL_USER: ${MYSQL_USER:?Define MYSQL_USER en .env}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Define MYSQL_PASSWORD en .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-cloudshop_catalogo}
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en .env (mismo valor que el microservicio de usuarios)}
     ports:
       - "8080:8080"
     healthcheck:
@@ -36,10 +37,72 @@ services:
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
     ports:
       - "8000:8000"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ventas-resenas:
+    build: ./ventas-resenas
+    container_name: cloudshop-ventas-resenas
+    restart: unless-stopped
+    environment:
+      MONGO_URI: ${MONGO_URI:?Define MONGO_URI en .env (IP privada de la VM de datos)}
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      PORT: "8002"
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:8002/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ordenes:
+    build: ./ordenes
+    container_name: cloudshop-ordenes
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en .env}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      CATALOGO_URL: http://catalogo:8080
+      VENTAS_URL: http://ventas-resenas:8002
+    ports:
+      - "8003:8003"
+    depends_on:
+      - catalogo
+      - ventas-resenas
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/health', timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  analitica:
+    build: ./analitica
+    container_name: cloudshop-analitica
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en .env}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      ATHENA_DATABASE: ${ATHENA_DATABASE:-cloudshop_analytics}
+      ATHENA_WORKGROUP: ${ATHENA_WORKGROUP:-primary}
+      ATHENA_OUTPUT_S3: ${ATHENA_OUTPUT_S3:-}
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)\""]
       interval: 10s
       timeout: 5s
       retries: 5

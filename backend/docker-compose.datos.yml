@@ -1,5 +1,5 @@
-# VM de datos: MySQL (catálogo) + PostgreSQL (usuarios).
-# Solo debe exponer 3306/5432 hacia la subred privada de la VPC
+# VM de datos: MySQL (catálogo) + PostgreSQL (usuarios) + MongoDB (ventas/reseñas).
+# Solo debe exponer 3306/5432/27017 hacia la subred privada de la VPC
 # (security groups: nunca abrir estos puertos a 0.0.0.0/0).
 #
 # Uso:
@@ -48,6 +48,22 @@ services:
       retries: 24
       start_period: 10s
 
+  mongo:
+    image: mongo:7
+    container_name: cloudshop-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand(\"ping\").ok' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+
 volumes:
   mysql_data:
   pg_data:
+  mongo_data:
