@@ -15,7 +15,7 @@ CloudShop es un e-commerce con arquitectura de microservicios sobre AWS. Se comp
 - **4 máquinas virtuales EC2**: 2 de producción (app), 1 de datos y 1 de ingesta.
 - **1 VPC** con una subred pública y un Internet Gateway (sin NAT).
 - **1 ALB** (Application Load Balancer) en el puerto 80 que reparte el tráfico HTTP entre las 2 MV de aplicación.
-- **2 buckets S3**: uno privado (data lake para Glue + Athena) y uno público (imágenes del catálogo de productos).
+- **1 bucket S3** (data lake) + **Glue** (catálogo) + **Athena** (consultas) + microservicio analítico.
 - **Catálogo centralizado de APIs** con `swaggerapi/swagger-ui` (definiciones OpenAPI de MS1–MS5).
 - **Frontend React SPA** desplegado en **AWS Amplify**.
 
@@ -56,18 +56,12 @@ CloudShop es un e-commerce con arquitectura de microservicios sobre AWS. Se comp
                                 │ put_object (boto3)
                         ┌───────▼──────┐      ┌─────────┐
                         │ Bucket S3    │ ───► │  Glue   │
-                        │ (data lake,  │      └────┬────┘
-                        │  privado)    │      ┌────▼─────┐
-                        └──────────────┘      │  Athena  │
+                        │ (CSV/JSON)   │      └────┬────┘
+                        └──────────────┘      ┌────▼─────┐
+                                              │  Athena  │
                                               └────┬─────┘
                                                    │
                                         Microservicio Analítico (MS5)
-                        ┌──────────────┐
-                        │ Bucket S3    │ ◄── aws s3 sync (mv-ingesta)
-                        │ (imágenes,   │
-                        │  público)    │
-                        └──────┬───────┘
-                               │ imagen_url en MySQL → Frontend (<img src>)
 ```
 
 ---
@@ -320,9 +314,7 @@ Se montan con **contenedores Docker**, una **red Docker propia `red_bd`** y **vo
 
 ---
 
-## 7. Buckets S3
-
-### 7a. Bucket de datos (data lake, privado)
+## 7. Bucket S3 (data lake)
 
 - **Nombre:** `cloudshop-data-lake-2026-utec-mr-cs2032-v2`
 - **Acceso:** solo vía IAM Role de la MV de ingesta (`LabInstanceProfile`); no público.
@@ -337,53 +329,12 @@ s3://cloudshop-data-lake-2026-utec-mr-cs2032-v2/
 ├── movimientos_stock/movimientos_stock.csv
 ├── ordenes/ordenes.json
 ├── detalle_ordenes/detalle_ordenes.csv
-├── resenas/resenas.json
-└── athena-results/   (resultados de Athena)
+└── resenas/resenas.json
 ```
 
 > **Un prefijo por tabla, sin excepción.** Athena/Glue definen una tabla a partir de todos los objetos bajo un mismo prefijo; si dos archivos con columnas distintas compartieran carpeta, Athena mezclaría sus columnas en una sola tabla. Por eso cada archivo tiene su propia carpeta al mismo nivel (no agrupadas por microservicio de origen como en una versión anterior de este documento).
 
-### 7b. Bucket de imágenes (assets estáticos, público)
-
-- **Nombre:** `cloudshop-imagenes-TU-USUARIO-2026` (único globalmente — usa tu usuario).
-- **Acceso:** público de lectura (`s3:GetObject` para `Principal: "*"`). El frontend carga las imágenes directamente desde S3 sin pasar por el backend.
-- **Carga:** desde `cloudshop-mv-ingesta` (tiene `LabInstanceProfile`) con `aws s3 sync`.
-
-```text
-s3://cloudshop-imagenes-TU-USUARIO-2026/
-└── imagenes/
-    ├── 00191_CELULAR_A5_4RAM_128GB.jpg
-    ├── 00115_CELULAR_A7_3RAM_Y_64GB.jpg
-    └── ...  (5.134 JPGs del scraping de Falabella)
-```
-
-**Bucket policy** (permite lectura pública de solo los objetos, no el listado):
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::cloudshop-imagenes-TU-USUARIO-2026/*"
-    }
-  ]
-}
-```
-
-**Cómo se integra con el catálogo:**
-
-`Data/scripts/src/scripts/build_catalogo.py` lee la variable de entorno `IMAGES_S3_BASE_URL` y genera `imagen_url` como URL absoluta de S3:
-
-```bash
-IMAGES_S3_BASE_URL=https://cloudshop-imagenes-TU-USUARIO-2026.s3.amazonaws.com \
-  uv run python -m scripts.build_catalogo
-# imagen_url resultante: https://cloudshop-imagenes-TU-USUARIO-2026.s3.amazonaws.com/imagenes/00191_....jpg
-```
-
-Sin esa variable, `imagen_url` queda como ruta relativa local (`imagenes/...`), lo que no funciona en producción. **Siempre define `IMAGES_S3_BASE_URL` antes de regenerar el catálogo y recargar MySQL.**
+> **Imágenes del catálogo:** `imagen_url` almacena la URL pública original del producto en Falabella (`media.falabella.com/...`), capturada durante el scraping. No se necesita un bucket S3 adicional para imágenes — el campo es un simple string URL y el frontend lo usa directamente con `<img src>`. Los admins pueden sobreescribirlo con cualquier URL pública al crear o editar un producto.
 
 ---
 
@@ -548,7 +499,6 @@ El frontend consume los 5 microservicios (≥2 métodos REST de cada uno):
 | `CORS_ORIGINS` | MV app (los 5 servicios) | Amplify + `localhost:5173` |
 | `DOCKERHUB_USER` | máquina de build (`docker compose build/push`) + MV app-1/app-2 (`docker compose pull`) | tu usuario de Docker Hub |
 | `AWS_REGION`, `ATHENA_DATABASE`, `ATHENA_WORKGROUP`, `ATHENA_OUTPUT_S3` | MV app (MS5) | ver §9 |
-| `IMAGES_S3_BASE_URL` | scripts de datos (`build_catalogo.py`) | URL base del bucket de imágenes, ej. `https://cloudshop-imagenes-TU-USUARIO-2026.s3.amazonaws.com`; sin este valor `imagen_url` queda como ruta local (no funciona en prod) |
 | `ingesta_my` / `ingesta_pg` | MV datos (init) + MV ingesta | solo lectura |
 
 ### 13.2 Orden de construcción
@@ -556,15 +506,14 @@ El frontend consume los 5 microservicios (≥2 métodos REST de cada uno):
 1. **Red**: VPC + subred pública + IGW + tabla de ruteo.
 2. **Security Groups**: `sg-app`, `sg-bd`, `sg-ingesta`, `sg-alb` (según §4).
 3. **MV datos**: instalar Docker, clonar repo, crear `.env`, `docker compose -f docker-compose.datos.yml up -d` (MySQL + PostgreSQL + MongoDB).
-4. **Bucket de imágenes (§7b)**: crear bucket público en S3, subir los 5.134 JPGs desde `cloudshop-mv-ingesta` con `aws s3 sync`, anotar la URL base (`IMAGES_S3_BASE_URL`).
-5. **Carga de datos**: en `Data/scripts` — exportar `IMAGES_S3_BASE_URL`, regenerar `productos.csv` con `build_catalogo.py`, luego `faker_ventas_resenas.py` y `load_csv_bd.py` (CSVs/JSON → MySQL + PostgreSQL + MongoDB).
-6. **MV ingesta**: configurar `.env` de `ingesta-usuarios`/`ingesta-catalogo`, `docker compose up --build` (`ingesta-ventas` sigue pendiente: subir los 3 archivos de ventas/reseñas a S3 a mano por ahora).
-7. **Imágenes Docker**: `docker compose build` + `docker login` + `docker compose push` (Docker Hub) con `DOCKERHUB_USER` definido.
-8. **MV app-1 y app-2**: clonar repo, `.env` apuntando a `10.0.1.10` (incluye `JWT_SECRET`, `ADMIN_EMAILS`, `MONGO_URI`, `ATHENA_*`), `docker compose pull` + `docker compose up -d`.
-9. **ALB**: crear ALB + 5 target groups (registrar app-1 y app-2) + listener :80 con reglas por path.
-10. **S3 data lake + Glue + Athena**: bucket privado, tablas vía `CREATE EXTERNAL TABLE` en Athena, 6 queries, 2 vistas.
-11. **Swagger UI**: pendiente hasta escribir `docs/openapi/*.yaml` (§11).
-12. **Amplify** (frontend) apuntando al DNS del ALB.
+4. **Carga de datos**: `Data/scripts` — `faker_ventas_resenas.py` genera ventas/reseñas, luego `load_csv_bd.py` (CSVs/JSON → MySQL + PostgreSQL + MongoDB).
+5. **MV ingesta**: clonar repo, configurar `.env` de `ingesta-usuarios`/`ingesta-catalogo`, `docker compose up --build` (`ingesta-ventas` sigue pendiente: subir los 3 archivos de ventas/reseñas a S3 a mano por ahora).
+6. **Imágenes**: `docker compose build` + `docker login` + `docker compose push` (Docker Hub) con `DOCKERHUB_USER` definido.
+7. **MV app-1 y app-2**: clonar repo, `.env` apuntando a `10.0.1.10` (incluye `JWT_SECRET`, `ADMIN_EMAILS`, `MONGO_URI`, `ATHENA_*`), `docker compose pull` + `docker compose up -d`.
+8. **ALB**: crear ALB + 5 target groups (registrar app-1 y app-2) + listener :80 con reglas por path.
+9. **S3 + Glue + Athena**: bucket, tablas vía `CREATE EXTERNAL TABLE` en Athena, 6 queries, 2 vistas.
+10. **Swagger UI**: pendiente hasta escribir `docs/openapi/*.yaml` (§11).
+11. **Amplify** (frontend) apuntando al DNS del ALB.
 
 > Guía **paso a paso, 100% consola de AWS Academy** (sin AWS CLI/PowerShell) para los pasos 1–9 y 11: `DESPLIEGUE_AWS_MANUAL.md`.
 >

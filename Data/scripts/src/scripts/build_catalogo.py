@@ -15,7 +15,6 @@ Reglas:
   - Stock sintético determinista (seed fija): 1-500 unidades, ~5% agotado.
 """
 
-import os
 import re
 from pathlib import Path
 
@@ -35,10 +34,6 @@ FRACCION_AGOTADOS = 0.05
 MAX_NOMBRE = 150
 MAX_MARCA = 80
 MAX_URL = 512
-
-# Si se define la variable de entorno IMAGES_S3_BASE_URL (ej. https://cloudshop-imagenes-xxx.s3.amazonaws.com),
-# imagen_url se genera como URL absoluta de S3. Sin ella, queda como ruta relativa local.
-IMAGES_S3_BASE_URL = os.environ.get("IMAGES_S3_BASE_URL", "").rstrip("/")
 
 
 def nombre_legible(slug: str) -> str:
@@ -99,12 +94,7 @@ def main():
     df["sku"] = [f"CAT-{i:06d}" for i in df["id"]]
     df["nombre"] = df["name"].astype(str).str.slice(0, MAX_NOMBRE)
     df["marca"] = df["brand_name"].fillna("").astype(str).str.slice(0, MAX_MARCA)
-    if IMAGES_S3_BASE_URL:
-        df["imagen_url"] = df["local_image"].fillna("").apply(
-            lambda p: f"{IMAGES_S3_BASE_URL}/imagenes/{Path(str(p)).name}" if str(p).strip() else ""
-        ).str.slice(0, MAX_URL)
-    else:
-        df["imagen_url"] = df["local_image"].fillna("").astype(str).str.slice(0, MAX_URL)
+    df["imagen_url"] = df["image_url"].fillna("").astype(str).str.slice(0, MAX_URL)
     df["origen_url"] = df["link"].fillna("").astype(str).str.slice(0, MAX_URL)
     df["activo"] = 1
 
@@ -146,10 +136,6 @@ def main():
     inventario_df.to_csv(inventario_out, index=False)
 
     print("\n=== RESUMEN ===")
-    if IMAGES_S3_BASE_URL:
-        print(f"imagen_url: S3 ({IMAGES_S3_BASE_URL}/imagenes/...)")
-    else:
-        print("imagen_url: ruta relativa local (define IMAGES_S3_BASE_URL para URLs de S3)")
     print(f"Categorías: {len(categorias_df)} -> {categorias_out}")
     print(f"Productos:  {len(productos_df)} -> {productos_out}")
     print(f"Inventario: {len(inventario_df)} -> {inventario_out}")

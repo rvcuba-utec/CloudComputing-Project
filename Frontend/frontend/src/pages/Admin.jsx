@@ -76,6 +76,7 @@ function AdminProductos() {
         {!productoEditando && <label>Stock inicial<input name="stock_disponible" type="number" min="0" defaultValue={0}/></label>}
       </div>
       <label>Descripción<textarea name="descripcion" rows={3} defaultValue={productoEditando?.descripcion}/></label>
+      <label>URL de imagen<input name="imagen_url" type="url" placeholder="https://..." defaultValue={productoEditando?.imagen_url}/></label>
       {error && <p role="alert" className="error">{error}</p>}
       <button className="button" disabled={busy}>{editing === 'new' ? 'Crear producto' : 'Guardar cambios'}</button>
     </form>}

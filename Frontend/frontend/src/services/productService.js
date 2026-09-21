@@ -77,6 +77,7 @@ export const productService = {
       nombre: values.nombre,
       descripcion: values.descripcion || '',
       marca: values.marca || '',
+      imagen_url: values.imagen_url || '',
       precio: Number(values.precio),
       stock_disponible: Number(values.stock_disponible || 0),
     };
@@ -96,7 +97,7 @@ export const productService = {
       precio_oferta: null,
       stock: payload.stock_disponible,
       descripcion: payload.descripcion,
-      imagen_url: '',
+      imagen_url: payload.imagen_url || '',
       activo: true,
     };
     demoProducts = [...demoProducts, producto];
@@ -109,6 +110,7 @@ export const productService = {
     if (values.marca !== undefined) payload.marca = values.marca;
     if (values.precio !== undefined) payload.precio = Number(values.precio);
     if (values.descripcion !== undefined) payload.descripcion = values.descripcion;
+    if (values.imagen_url !== undefined) payload.imagen_url = values.imagen_url;
 
     if (!isDemo) {
       const res = await api(`/api/catalogo/productos/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
