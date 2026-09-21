@@ -259,6 +259,9 @@ AWS_REGION=us-east-1
 ATHENA_DATABASE=cloudshop_analytics
 ATHENA_WORKGROUP=cloudshop-wg
 ATHENA_OUTPUT_S3=s3://TU-BUCKET/athena-results/
+
+# Bucket de imágenes — completa con el nombre real tras crear el bucket en §8.0
+IMAGES_S3_BASE_URL=https://cloudshop-imagenes-TU-USUARIO-2026.s3.amazonaws.com
 ```
 
 Build, login y push:
@@ -284,6 +287,8 @@ docker compose ps        # los 5 en "healthy"
 
 ### 7.4 Cargar los datos (usuarios, catálogo, ventas, reseñas)
 
+> ⚠️ **Imágenes del catálogo:** antes de cargar los datos, completa el **§8.0** (crear el bucket de imágenes y subir los JPGs). Una vez hecho, regresa aquí con `IMAGES_S3_BASE_URL` definido para que `productos.csv` se genere con URLs absolutas de S3. Si omites este paso, las imágenes quedarán en blanco en el frontend.
+
 En el mismo terminal de `cloudshop-mv-app-1`:
 
 ```bash
@@ -301,15 +306,23 @@ cd /home/ubuntu/cloudshop/Data/scripts
 uv sync
 cp ../../backend/.env.example .env
 nano .env    # mismos valores de MYSQL_HOST / DATABASE_URL / MONGO_URI del paso 7.3
+             # y IMAGES_S3_BASE_URL=https://cloudshop-imagenes-TU-USUARIO-2026.s3.amazonaws.com
 ```
 
-Genera ventas/reseñas, valida y carga:
+Regenera el catálogo con URLs de S3 y luego genera ventas/reseñas, valida y carga:
+
+```bash
+# Regenera productos.csv con imagen_url apuntando al bucket de imágenes
+uv run python -m scripts.build_catalogo
+```
 
 ```bash
 uv run python -m scripts.faker_ventas_resenas
 uv run python -m scripts.load_csv_bd --dry-run
 uv run python -m scripts.load_csv_bd
 ```
+
+> 📌 Si definiste `IMAGES_S3_BASE_URL` **después** de ya haber cargado los datos, vuelve a correr `build_catalogo.py` y `load_csv_bd.py --solo-mysql` para recargar solo MySQL con los URLs correctos.
 
 Verifica conteos:
 
@@ -359,9 +372,76 @@ docker compose ps
 
 ---
 
-## 8. S3 + Glue (catálogo de datos)
+## 8. S3
 
-### 8.1 Crear el bucket
+### 8.0 Bucket de imágenes del catálogo (público)
+
+> ⚠️ **Hazlo antes de §7.4 (carga de datos).** Las URLs de imágenes se graban en MySQL durante la carga; si creas el bucket después, tendrás que recargar MySQL.
+
+**Sección:** barra de búsqueda → `S3` → **Buckets** → **Create bucket**.
+
+1. **Bucket name**: `cloudshop-imagenes-TU-USUARIO-2026` (único globalmente — usa tu usuario real).
+2. **AWS Region**: `us-east-1`.
+3. **Object Ownership**: `ACLs disabled`.
+4. **Block Public Access**: **desmarca las 4 casillas** (este bucket debe ser público para que el frontend pueda cargar las imágenes directamente).
+5. Marca la casilla de confirmación "I acknowledge that the current settings...".
+6. **Create bucket**.
+
+**Añadir la bucket policy** (lectura pública de objetos, sin listar el bucket):
+
+7. Dentro del bucket → pestaña **Permissions** → sección **Bucket policy** → **Edit**.
+8. Pega esto (reemplaza `cloudshop-imagenes-TU-USUARIO-2026` con tu nombre real):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::cloudshop-imagenes-TU-USUARIO-2026/*"
+    }
+  ]
+}
+```
+
+9. **Save changes**.
+
+**Subir las imágenes desde `cloudshop-mv-ingesta`** (ya tiene `LabInstanceProfile`):
+
+Abre EC2 Instance Connect en `cloudshop-mv-ingesta` y ejecuta:
+
+```bash
+# Las 5.134 imágenes JPG ya están en el repo clonado durante el bootstrap (§7.1)
+aws s3 sync /home/ubuntu/cloudshop/Data/csv/imagenes/ \
+    s3://cloudshop-imagenes-TU-USUARIO-2026/imagenes/ \
+    --only-show-errors
+# Tarda ~3-5 minutos. Al terminar muestra un resumen de archivos subidos.
+```
+
+**Verificación rápida:**
+
+```bash
+aws s3 ls s3://cloudshop-imagenes-TU-USUARIO-2026/imagenes/ | wc -l
+# Debe mostrar ~5134
+```
+
+**Actualiza el `.env` de `mv-app-1` y `mv-app-2`** con el nombre real del bucket:
+
+```bash
+# En mv-app-1 (y luego mv-app-2):
+cd /home/ubuntu/cloudshop/backend
+nano .env
+# IMAGES_S3_BASE_URL=https://cloudshop-imagenes-TU-USUARIO-2026.s3.amazonaws.com
+docker compose up -d    # recarga el entorno (el backend no usa esta variable, pero queda registrada)
+```
+
+> 📌 El backend Go no sirve imágenes — simplemente guarda y devuelve el string `imagen_url` de MySQL. Lo que importa es que MySQL tenga las URLs absolutas de S3, lo cual se logra regenerando `productos.csv` con `build_catalogo.py` antes de correr `load_csv_bd.py` (§7.4).
+
+---
+
+### 8.1 Bucket de datos (data lake, privado)
 
 **Sección:** barra de búsqueda → `S3` → **Buckets** → **Create bucket**.
 
@@ -736,9 +816,10 @@ docker compose up -d      # recrea contenedores con el nuevo CORS_ORIGINS
 3. **Roles**: registra un usuario con email en `ADMIN_EMAILS` → token con `rol=admin`; con usuario normal, `POST /api/catalogo/productos` debe dar `403`.
 4. **Flujo de compra completo** en el frontend de Amplify: login → catálogo → detalle → "Comprar" → "Mis compras" → reseña.
 5. **Panel `/admin`** (usuario admin): crear/editar/desactivar producto; listar usuarios; ver órdenes.
-6. **S3**: 9 carpetas con datos (§8.2).
-7. **Athena**: 9 tablas devuelven filas; 6 consultas y 2 vistas corren sin error (§9).
-8. **Security Groups**: los puertos 3306/5432/27017 no deben ser accesibles desde Internet.
+6. **S3 imágenes**: bucket público con ~5.134 objetos bajo `imagenes/`; una URL de imagen de un producto devuelve el JPG en el navegador (§8.0).
+7. **S3 data lake**: 9 carpetas con datos (§8.2).
+8. **Athena**: 9 tablas devuelven filas; 6 consultas y 2 vistas corren sin error (§9).
+9. **Security Groups**: los puertos 3306/5432/27017 no deben ser accesibles desde Internet.
 
 ### Pendientes conocidos
 
