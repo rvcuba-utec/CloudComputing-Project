@@ -15,5 +15,3 @@ __pycache__/
 .idea/
 .vscode/
 
-# Imágenes del scraping (muy pesadas, se regeneran con el scraper)
-Data/csv/imagenes/
