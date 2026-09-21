@@ -62,7 +62,8 @@ Proposal/                 Documentos de sustentación
 
 ## Quickstart
 
-Despliegue completo en AWS: ver `DESPLIEGUE_AWS.md` (CloudFormation).
+Despliegue completo en AWS desde el navegador (sin terminal local): ver `DESPLIEGUE_AWS_CONSOLA.md`.
+Despliegue con terminal local: ver `DESPLIEGUE_AWS_MANUAL.md`.
 Despliegue manual de las VMs: ver `Backend/DESPLIEGUE.md`.
 
 Para regenerar los datos:
@@ -77,7 +78,8 @@ uv run python -m scripts.load_csv_bd --dry-run  # validar
 ## Documentación
 
 - **Sustentación final**: `Proposal/03_Sustentacion_final.md`
-- **Despliegue en AWS (paso a paso)**: `DESPLIEGUE_AWS.md`
+- **Despliegue en AWS (paso a paso, con terminal local)**: `DESPLIEGUE_AWS_MANUAL.md`
+- **Despliegue en AWS (100 % desde el navegador, sin terminal local)**: `DESPLIEGUE_AWS_CONSOLA.md`
 - **Despliegue manual de VMs**: `Backend/DESPLIEGUE.md`
 - **Ingesta**: `Ingesta/README.md`
 - **Scripts de datos**: `Data/scripts/README.md`
