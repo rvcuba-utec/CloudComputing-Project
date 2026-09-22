@@ -5,16 +5,29 @@
 # boto3 toma las credenciales de AWS del IAM Role asociado a la EC2 (no se
 # guardan claves en el repositorio).
 #
-# Uso (en la MV de ingesta):
-#   cp ingesta-usuarios/.env.example ingesta-usuarios/.env
-#   cp ingesta-catalogo/.env.example ingesta-catalogo/.env
-#   nano ingesta-usuarios/.env    # POSTGRES_HOST = IP privada de la MV de datos
-#   nano ingesta-catalogo/.env    # MYSQL_HOST   = IP privada de la MV de datos
-#   docker compose up --build     # ejecuta ambos contenedores una vez y termina
+# --- FLUJO (una sola vez, en la máquina de desarrollo o VM de ingesta) ---
+#
+# 1. Construir y publicar en Docker Hub (desde tu máquina, con el repo clonado):
+#      cp .env.example .env && nano .env   # definir DOCKERHUB_USER
+#      docker compose build
+#      docker login
+#      docker compose push
+#
+# 2. Ejecutar la ingesta (trigger manual desde cloudshop-mv-ingesta):
+#      cp .env.example .env && nano .env   # DOCKERHUB_USER
+#      cp ingesta-usuarios/.env.example ingesta-usuarios/.env
+#      cp ingesta-catalogo/.env.example ingesta-catalogo/.env
+#      cp ingesta-ventas/.env.example  ingesta-ventas/.env
+#      nano ingesta-usuarios/.env   # POSTGRES_HOST = 10.0.1.10
+#      nano ingesta-catalogo/.env   # MYSQL_HOST    = 10.0.1.10
+#      nano ingesta-ventas/.env     # MONGO_URI     = mongodb://10.0.1.10:27017/cloudshop_ventas
+#      docker compose pull          # descarga las imágenes desde Docker Hub
+#      docker compose up            # ejecuta los 3 contenedores y termina
 
 services:
   ingesta-usuarios:
     build: ./ingesta-usuarios
+    image: ${DOCKERHUB_USER}/cloudshop-ingesta-usuarios:latest
     container_name: cloudshop-ingesta-usuarios
     env_file:
       - ./ingesta-usuarios/.env
@@ -22,7 +35,16 @@ services:
 
   ingesta-catalogo:
     build: ./ingesta-catalogo
+    image: ${DOCKERHUB_USER}/cloudshop-ingesta-catalogo:latest
     container_name: cloudshop-ingesta-catalogo
     env_file:
       - ./ingesta-catalogo/.env
+    restart: "no"
+
+  ingesta-ventas:
+    build: ./ingesta-ventas
+    image: ${DOCKERHUB_USER}/cloudshop-ingesta-ventas:latest
+    container_name: cloudshop-ingesta-ventas
+    env_file:
+      - ./ingesta-ventas/.env
     restart: "no"

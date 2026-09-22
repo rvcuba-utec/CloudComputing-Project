@@ -319,26 +319,52 @@ docker exec cloudshop-postgres psql -U cloud_user -d cloudshop_usuarios -c "SELE
 docker exec cloudshop-mongo mongosh cloudshop_ventas --quiet --eval "db.ventas.countDocuments()"
 ```
 
-### 7.5 `cloudshop-mv-ingesta`: ingesta-usuarios + ingesta-catalogo
+### 7.5 `cloudshop-mv-ingesta`: publicar imágenes y ejecutar ingesta
 
-Abre EC2 Instance Connect en `cloudshop-mv-ingesta`:
+Las imágenes de ingesta viven en Docker Hub. Primero publícalas desde `cloudshop-mv-app-1` (donde ya está el código y Docker instalado — usa EC2 Instance Connect):
 
 ```bash
 cd /home/ubuntu/cloudshop/Ingesta
+cp .env.example .env
+nano .env    # DOCKERHUB_USER=tu_usuario_dockerhub
+
+docker compose build
+docker login    # pide usuario y contraseña/token de Docker Hub
+docker compose push
+```
+
+Luego abre EC2 Instance Connect en `cloudshop-mv-ingesta` y configura + dispara la ingesta:
+
+```bash
+cd /home/ubuntu/cloudshop/Ingesta
+
+cp .env.example .env
+nano .env    # DOCKERHUB_USER=tu_usuario_dockerhub
+
 cp ingesta-usuarios/.env.example ingesta-usuarios/.env
 cp ingesta-catalogo/.env.example ingesta-catalogo/.env
+cp ingesta-ventas/.env.example  ingesta-ventas/.env
+
 nano ingesta-usuarios/.env
 #   POSTGRES_HOST=10.0.1.10
 #   POSTGRES_PASSWORD=ingesta_pg_readonly
 #   S3_BUCKET=<el bucket del paso 8>
+
 nano ingesta-catalogo/.env
 #   MYSQL_HOST=10.0.1.10
 #   MYSQL_PASSWORD=ingesta_my_readonly
 #   S3_BUCKET=<el mismo bucket>
 
-docker compose up --build
-docker compose logs        # "OK | tabla=... | filas=..." por cada tabla
+nano ingesta-ventas/.env
+#   MONGO_URI=mongodb://10.0.1.10:27017/cloudshop_ventas
+#   S3_BUCKET=<el mismo bucket>
+
+docker compose pull           # descarga las 3 imágenes desde Docker Hub
+docker compose up             # ejecuta los 3 contenedores; terminan solos al acabar
+docker compose logs           # "OK | tabla/coleccion=... | filas/docs=..." por cada uno
 ```
+
+> Para **re-ejecutar la ingesta** en cualquier momento (ej. después de crear un producto nuevo): `docker compose up` desde `cloudshop-mv-ingesta`.
 
 ### 7.6 `cloudshop-mv-app-2`: solo pull
 
@@ -370,22 +396,12 @@ docker compose ps
 5. **Create bucket**.
 6. Dentro del bucket → **Create folder** → `athena-results` → **Create folder**.
 
-### 8.2 Subir los archivos de ventas/reseñas desde la VM (sin `scp` ni laptop)
+### 8.2 Verificar contenido del bucket
 
-> En la guía original este paso requería `scp` a tu laptop y luego subir desde ahí. Aquí se hace directamente desde la VM de ingesta, que ya tiene `LabInstanceProfile` con permisos S3.
-
-Abre EC2 Instance Connect en `cloudshop-mv-ingesta` y copia los archivos desde `mv-app-1` a S3:
+Una vez ejecutada la ingesta (§7.5), verifica desde EC2 Instance Connect en `cloudshop-mv-ingesta`:
 
 ```bash
-# Los archivos están en cloudshop-mv-app-1, cópialos primero a esta VM con scp interno:
-scp -o StrictHostKeyChecking=no ubuntu@10.0.1.11:/home/ubuntu/cloudshop/Data/csv/ventas/ordenes.json /tmp/
-scp -o StrictHostKeyChecking=no ubuntu@10.0.1.11:/home/ubuntu/cloudshop/Data/csv/ventas/detalle_ordenes.csv /tmp/
-scp -o StrictHostKeyChecking=no ubuntu@10.0.1.11:/home/ubuntu/cloudshop/Data/csv/ventas/resenas.json /tmp/
-
-# Súbelos al bucket (reemplaza TU-BUCKET):
-aws s3 cp /tmp/ordenes.json         s3://TU-BUCKET/ordenes/ordenes.json
-aws s3 cp /tmp/detalle_ordenes.csv  s3://TU-BUCKET/detalle_ordenes/detalle_ordenes.csv
-aws s3 cp /tmp/resenas.json         s3://TU-BUCKET/resenas/resenas.json
+aws s3 ls s3://TU-BUCKET/ --recursive
 ```
 
 > 📌 La VM de ingesta puede ejecutar `aws s3 cp` porque tiene `LabInstanceProfile`. Las VMs de app y datos no tienen ese perfil, por eso usamos la de ingesta como puente.
@@ -740,5 +756,4 @@ docker compose up -d      # recrea contenedores con el nuevo CORS_ORIGINS
 
 ### Pendientes conocidos
 
-- **`ingesta-ventas`** (MongoDB → S3) no está construido — mientras tanto los 3 archivos se suben desde la VM de ingesta (§8.2).
 - **Swagger UI centralizado** no existe — cada microservicio FastAPI tiene `/docs` nativo; MS2 (Go) y MS3 (Node) no tienen Swagger nativo.

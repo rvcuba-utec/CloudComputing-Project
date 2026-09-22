@@ -328,26 +328,54 @@ docker exec cloudshop-postgres psql -U cloud_user -d cloudshop_usuarios -c "SELE
 docker exec cloudshop-mongo mongosh cloudshop_ventas --quiet --eval "db.ventas.countDocuments()"
 ```
 
-### 7.5 `cloudshop-mv-ingesta`: ingesta-usuarios + ingesta-catalogo
+### 7.5 `cloudshop-mv-ingesta`: publicar imágenes y ejecutar ingesta
+
+Las imágenes de ingesta viven en Docker Hub. Primero publícalas desde tu máquina de desarrollo (o desde `cloudshop-mv-app-1` donde ya está el código y Docker):
+
+```bash
+# En tu máquina de desarrollo (una sola vez):
+cd Ingesta
+cp .env.example .env
+nano .env    # DOCKERHUB_USER=tu_usuario_dockerhub
+
+docker compose build
+docker login
+docker compose push
+```
+
+Luego configura y dispara la ingesta en `cloudshop-mv-ingesta`:
 
 ```bash
 cd /home/ubuntu/cloudshop/Ingesta
+
+cp .env.example .env
+nano .env
+#   DOCKERHUB_USER=tu_usuario_dockerhub
+
 cp ingesta-usuarios/.env.example ingesta-usuarios/.env
 cp ingesta-catalogo/.env.example ingesta-catalogo/.env
+cp ingesta-ventas/.env.example  ingesta-ventas/.env
+
 nano ingesta-usuarios/.env
 #   POSTGRES_HOST=10.0.1.10
 #   POSTGRES_PASSWORD=ingesta_pg_readonly     (usuario ya creado por postgres-init/01_esquema.sql)
-#   S3_BUCKET=<el bucket que crearás en el paso 8>
+#   S3_BUCKET=<el bucket del paso 8>
+
 nano ingesta-catalogo/.env
 #   MYSQL_HOST=10.0.1.10
 #   MYSQL_PASSWORD=ingesta_my_readonly
 #   S3_BUCKET=<el mismo bucket>
 
-docker compose up --build
-docker compose logs        # debe mostrar "OK | tabla=... | filas=..." por cada tabla
+nano ingesta-ventas/.env
+#   MONGO_URI=mongodb://10.0.1.10:27017/cloudshop_ventas
+#   S3_BUCKET=<el mismo bucket>
+
+docker compose pull           # descarga las 3 imágenes desde Docker Hub
+docker compose up             # ejecuta los 3 contenedores; terminan solos al acabar
+docker compose logs           # debe mostrar "OK | tabla/coleccion=... | filas/docs=..." por cada uno
 ```
 
-> ⏳ **`ingesta-ventas` (MongoDB → S3) todavía no existe** (ver `BLUEPRINT.md` §8). Mientras tanto, sube a mano los 3 archivos que generó `faker_ventas_resenas.py` en `mv-app-1` (`Data/csv/ventas/{ordenes.json,detalle_ordenes.csv,resenas.json}`) — el paso 8.3 te dice exactamente a qué carpeta de S3 va cada uno.
+> Para **re-ejecutar la ingesta** en cualquier momento (ej. después de crear un producto nuevo via Postman): `docker compose up` — no hace falta `pull` salvo que hayas publicado una nueva imagen.
 
 ### 7.6 `cloudshop-mv-app-2`: solo pull
 
@@ -377,13 +405,9 @@ docker compose ps
 5. **Create bucket**.
 6. Dentro del bucket → **Create folder** → nombre `athena-results` → **Create folder** (aquí escribirá Athena los resultados de cada consulta).
 
-### 8.2 Subir manualmente los archivos de ventas/reseñas (mientras no exista `ingesta-ventas`)
+### 8.2 Verificar contenido del bucket
 
-1. Descarga (o copia por `scp`) desde `cloudshop-mv-app-1` los 3 archivos: `Data/csv/ventas/ordenes.json`, `detalle_ordenes.csv`, `resenas.json`.
-2. En la consola S3, dentro del bucket, crea 3 carpetas: `ordenes/`, `detalle_ordenes/`, `resenas/` (botón **Create folder**).
-3. Entra a cada carpeta → **Upload** → **Add files** → sube el archivo correspondiente (`ordenes/ordenes.json`, `detalle_ordenes/detalle_ordenes.csv`, `resenas/resenas.json`).
-
-**Resultado esperado en el bucket** (una vez `ingesta-usuarios`/`ingesta-catalogo` también corrieron):
+Una vez ejecutada la ingesta completa (§7.5), el bucket debe tener este layout:
 
 ```text
 usuarios/usuarios.csv
@@ -755,5 +779,4 @@ Recorre este checklist (coincide con `BLUEPRINT.md` §14):
 
 ### Pendientes conocidos (no bloquean la entrega, pero quedan documentados)
 
-- **`ingesta-ventas`** (MongoDB → S3) no está construido — mientras tanto, los 3 archivos de ventas/reseñas se suben a mano (§8.2). Si se construye después, solo hay que apuntarlo al mismo layout de carpetas (`ordenes/`, `detalle_ordenes/`, `resenas/`) y las tablas de Glue ya creadas lo recogen sin cambios.
 - **Swagger UI centralizado** (`docs/openapi/*.yaml`) no existe todavía — cada microservicio FastAPI sigue teniendo su Swagger nativo en `/docs` (MS1, MS4, MS5); MS2 (Go) y MS3 (Node) no tienen Swagger nativo.

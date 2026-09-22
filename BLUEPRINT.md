@@ -253,7 +253,7 @@ GET /analitica/clientes-frecuentes
 
 - SQL de cada endpoint: `Backend/analitica/app/routers/analitica.py`.
 - Requiere `JWT_SECRET`, `AWS_REGION`, `ATHENA_DATABASE`, `ATHENA_WORKGROUP`, `ATHENA_OUTPUT_S3`. Sin `ATHENA_OUTPUT_S3` responde `503` (no inventa datos).
-- **Dependencia real:** solo devuelve filas si S3 + Glue (§9) ya están poblados con `ordenes/ordenes.json`, `detalle_ordenes/detalle_ordenes.csv` y `resenas/resenas.json` — hoy esos 3 archivos se generan con `Data/scripts/src/scripts/faker_ventas_resenas.py` mas **deben subirse a S3 a mano** (`ingesta-ventas` sigue pendiente, ver §8).
+- **Dependencia real:** solo devuelve filas si S3 + Glue (§9) ya están poblados — los 9 archivos los genera la ingesta (`ingesta-usuarios`, `ingesta-catalogo`, `ingesta-ventas`, ver §8).
 
 ### 5.6 Imágenes Docker (build → push → pull)
 
@@ -303,7 +303,7 @@ Se montan con **contenedores Docker**, una **red Docker propia `red_bd`** y **vo
 |---|---|---|---|---|---|
 | MySQL 8.4 | `cloudshop-mysql` | 3306 | `cloudshop_catalogo` | `cloud_user` | `ingesta_my` |
 | PostgreSQL 16 | `cloudshop-postgres` | 5432 | `cloudshop_usuarios` | `cloud_user` | `ingesta_pg` |
-| MongoDB | `cloudshop-mongo` | 27017 | `cloudshop_ventas` | sin auth (aislado por SG) | `ingesta_mongo` *(pendiente)* |
+| MongoDB | `cloudshop-mongo` | 27017 | `cloudshop_ventas` | sin auth (aislado por SG) | sin auth (aislado por SG) |
 
 - Esquema SQL inicial: `Backend/products/init.sql` (MySQL) y `Backend/postgres-init/01_esquema.sql` (PostgreSQL, incluye la columna `rol`), montados en `docker-compose.datos.yml`. MongoDB no necesita esquema previo (Mongoose lo crea al primer insert).
 - Volúmenes: `mysql_data`, `pg_data`, `mongo_data`.
@@ -346,15 +346,27 @@ Tres contenedores Python con `boto3`, estrategia **pull del 100 %**, credenciale
 |---|---|---|---|
 | `ingesta-usuarios` | PostgreSQL | `usuarios`, `direcciones_envio` | `usuarios/*.csv` |
 | `ingesta-catalogo` | MySQL | `categorias`, `productos`, `inventario`, `movimientos_stock` | `categorias/`, `productos/`, `inventario/`, `movimientos_stock/` |
-| `ingesta-ventas` *(pendiente)* | MongoDB | `ordenes`, `resenas` | `ordenes/ordenes.json`, `detalle_ordenes/detalle_ordenes.csv`, `resenas/resenas.json` |
+| `ingesta-ventas` | MongoDB | `ventas`, `resenas` | `ordenes/ordenes.json`, `detalle_ordenes/detalle_ordenes.csv`, `resenas/resenas.json` |
+
+Las imágenes se publican en Docker Hub (igual que los microservicios). El trigger es **manual**: un operador ejecuta `docker compose pull && docker compose up` en la VM de ingesta cuando necesita refrescar S3.
 
 ```bash
+# Publicar imágenes (una sola vez, desde la máquina de desarrollo):
+cd Ingesta
+cp .env.example .env && nano .env   # DOCKERHUB_USER
+docker compose build && docker login && docker compose push
+
+# Trigger manual (en cloudshop-mv-ingesta):
 cd /home/ubuntu/cloudshop/Ingesta
+cp .env.example .env && nano .env   # DOCKERHUB_USER
 cp ingesta-usuarios/.env.example ingesta-usuarios/.env
 cp ingesta-catalogo/.env.example ingesta-catalogo/.env
+cp ingesta-ventas/.env.example  ingesta-ventas/.env
 nano ingesta-usuarios/.env   # POSTGRES_HOST=10.0.1.10
 nano ingesta-catalogo/.env   # MYSQL_HOST=10.0.1.10
-docker compose up --build
+nano ingesta-ventas/.env     # MONGO_URI=mongodb://10.0.1.10:27017/cloudshop_ventas
+docker compose pull
+docker compose up
 ```
 
 ---
@@ -507,7 +519,7 @@ El frontend consume los 5 microservicios (≥2 métodos REST de cada uno):
 2. **Security Groups**: `sg-app`, `sg-bd`, `sg-ingesta`, `sg-alb` (según §4).
 3. **MV datos**: instalar Docker, clonar repo, crear `.env`, `docker compose -f docker-compose.datos.yml up -d` (MySQL + PostgreSQL + MongoDB).
 4. **Carga de datos**: `Data/scripts` — `faker_ventas_resenas.py` genera ventas/reseñas, luego `load_csv_bd.py` (CSVs/JSON → MySQL + PostgreSQL + MongoDB).
-5. **MV ingesta**: clonar repo, configurar `.env` de `ingesta-usuarios`/`ingesta-catalogo`, `docker compose up --build` (`ingesta-ventas` sigue pendiente: subir los 3 archivos de ventas/reseñas a S3 a mano por ahora).
+5. **MV ingesta**: clonar repo, configurar `.env` de los 3 contenedores de ingesta, publicar imágenes en Docker Hub, `docker compose pull && docker compose up` (trigger manual).
 6. **Imágenes**: `docker compose build` + `docker login` + `docker compose push` (Docker Hub) con `DOCKERHUB_USER` definido.
 7. **MV app-1 y app-2**: clonar repo, `.env` apuntando a `10.0.1.10` (incluye `JWT_SECRET`, `ADMIN_EMAILS`, `MONGO_URI`, `ATHENA_*`), `docker compose pull` + `docker compose up -d`.
 8. **ALB**: crear ALB + 5 target groups (registrar app-1 y app-2) + listener :80 con reglas por path.
@@ -532,6 +544,6 @@ El frontend consume los 5 microservicios (≥2 métodos REST de cada uno):
 - [ ] Security Groups prueban que las bases son privadas (puertos 3306/5432/27017 solo desde `sg-app`/`sg-ingesta`).
 - [ ] URL pública de Amplify consumiendo las 5 APIs (≥2 métodos REST por servicio), incluyendo el panel `/admin`.
 - [ ] Flujo de compra completo: login → catálogo → detalle → reservar/confirmar (MS4) → venta visible en "Mis compras" (MS3) → reseña (MS3).
-- [ ] MV ingesta: `ingesta-usuarios` e `ingesta-catalogo` corriendo, archivos en S3, logs con conteo de filas (`ingesta-ventas` es un gap conocido — archivos subidos a mano mientras tanto).
+- [ ] MV ingesta: los 3 contenedores (`ingesta-usuarios`, `ingesta-catalogo`, `ingesta-ventas`) ejecutados correctamente, 9 archivos en S3, logs con conteo de filas.
 - [ ] Glue: 1 tabla por archivo (9 tablas); Athena: 6 consultas (las de MS5) + 2 vistas.
 - [ ] Diagrama de arquitectura en draw.io (Backend + Frontend + Data Science).
