@@ -2,10 +2,10 @@ import { useCallback, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { productService } from '../services/productService';
-import { ordenesService } from '../services/ordenesService';
 import { ventasService } from '../services/ventasService';
 import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../hooks/useAuth';
+import { useCart } from '../hooks/useCart';
 import { money } from '../utils/format';
 import ProductVisual from '../components/ProductVisual';
 import RequestState from '../components/RequestState';
@@ -13,14 +13,13 @@ import RequestState from '../components/RequestState';
 export default function ProductDetail() {
   const { id } = useParams();
   const { user } = useAuth();
+  const { agregar } = useCart();
   const loader = useCallback(() => productService.get(id), [id]);
   const request = useFetch(loader);
   const p = request.data;
 
   const [cantidad, setCantidad] = useState(1);
-  const [comprando, setComprando] = useState(false);
   const [mensajeCompra, setMensajeCompra] = useState('');
-  const [errorCompra, setErrorCompra] = useState('');
 
   const [reviewsKey, setReviewsKey] = useState(0);
   const reviewsLoader = useCallback(() => ventasService.resenas(id), [id, reviewsKey]);
@@ -29,13 +28,9 @@ export default function ProductDetail() {
   const [enviandoResena, setEnviandoResena] = useState(false);
   const [errorResena, setErrorResena] = useState('');
 
-  async function comprar() {
-    setErrorCompra(''); setMensajeCompra(''); setComprando(true);
-    try {
-      await ordenesService.confirmar(user.id, [{ producto_id: p.id, cantidad }]);
-      setMensajeCompra('¡Compra confirmada! Revisa "Mis compras" en tu perfil.');
-      request.retry();
-    } catch (err) { setErrorCompra(err.message); } finally { setComprando(false); }
+  function agregarAlCarrito() {
+    agregar(p, cantidad);
+    setMensajeCompra(`${cantidad} ${cantidad === 1 ? 'unidad agregada' : 'unidades agregadas'} al carrito.`);
   }
 
   async function enviarResena(e) {
@@ -65,11 +60,9 @@ export default function ProductDetail() {
 
         {p.stock > 0 && <div className="purchase-box">
           <label>Cantidad<input type="number" min={1} max={p.stock} value={cantidad} onChange={e => setCantidad(Math.min(p.stock, Math.max(1, Number(e.target.value) || 1)))}/></label>
-          {user
-            ? <button className="button" disabled={comprando} onClick={comprar}>{comprando ? 'Procesando…' : `Comprar por ${money(p.precio * cantidad)}`}</button>
-            : <Link className="button" to="/login">Inicia sesión para comprar</Link>}
+          <button className="button" onClick={agregarAlCarrito}>Agregar por {money(p.precio * cantidad)}</button>
+          <Link className="button secondary" to="/carrito">Ver carrito</Link>
           {mensajeCompra && <p className="success">{mensajeCompra}</p>}
-          {errorCompra && <p role="alert" className="error">{errorCompra}</p>}
         </div>}
 
         <h2 className="small-heading">Detalles</h2>

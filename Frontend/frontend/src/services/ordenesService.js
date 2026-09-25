@@ -1,6 +1,7 @@
 import { api, isDemo } from './api';
 import { demoProducts } from './productService';
 import { ventasService } from './ventasService';
+import { invalidate } from './cache';
 
 function itemsDemo(items) {
   return items.map(({ producto_id, cantidad }) => {
@@ -26,7 +27,13 @@ export const ordenesService = {
     return { items: itemsOut, total: Number(itemsOut.reduce((s, i) => s + i.subtotal, 0).toFixed(2)), todo_disponible: itemsOut.every(i => i.disponible) };
   },
   async confirmar(usuarioId, items, direccionEnvio) {
-    if (!isDemo) return api('/ordenes/confirmar', { method: 'POST', body: JSON.stringify({ items, direccion_envio: direccionEnvio }) });
+    if (!isDemo) {
+      const res = await api('/ordenes/confirmar', { method: 'POST', body: JSON.stringify({ items, direccion_envio: direccionEnvio }) });
+      // La compra descontó stock y generó una venta en el servidor: refrescamos catálogo y ventas.
+      invalidate('productos:');
+      invalidate('ventas:');
+      return res;
+    }
 
     const itemsOut = itemsDemo(items);
     const faltante = itemsOut.find(i => !i.disponible);
@@ -36,6 +43,7 @@ export const ordenesService = {
       const producto = demoProducts.find(p => String(p.id) === String(item.producto_id));
       if (producto) producto.stock -= item.cantidad;
     }
+    invalidate('productos:'); // el stock demo cambió
 
     const total = Number(itemsOut.reduce((s, i) => s + i.subtotal, 0).toFixed(2));
     const ventaItems = itemsOut.map(({ producto_id, cantidad, precio_unitario }) => ({ producto_id, cantidad, precio_unitario }));

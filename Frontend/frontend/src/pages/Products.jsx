@@ -34,15 +34,12 @@ export default function Products() {
   function selectCategory(id) { setCategoryId(id); setPage(1); }
 
   return <main className="container">
-    <section className="intro"><div><p className="eyebrow">TU PRÓXIMO UPGRADE</p><h1>Lo que necesitas.<br/><span>Sin dar tantas vueltas.</span></h1><p>Encuentra tecnología para trabajar, estudiar<br className="desktop-break"/> y disfrutar a tu manera.</p></div><a className="intro-link" href="#catalogo">Explora el catálogo <ArrowDown size={18}/></a></section>
+    <section className="intro"><div><p className="eyebrow">TODO EN UN SOLO LUGAR</p><h1>Encuentra lo que buscas.<br/><span>Fácil y sin vueltas.</span></h1><p>Explora productos para tu hogar, estilo, bienestar,<br className="desktop-break"/> entretenimiento y mucho más.</p></div><a className="intro-link" href="#catalogo">Ver productos <ArrowDown size={18}/></a></section>
     <section id="catalogo" className="catalog">
-      <div className="catalog-heading"><h2>Elige tu próximo equipo</h2><label className="search"><Search size={19}/><input aria-label="Buscar productos" placeholder="¿Qué estás buscando?" value={search} onChange={e => setSearch(e.target.value)}/></label></div>
+      <div className="catalog-heading"><h2>Explora nuestro catálogo</h2><label className="search"><Search size={19}/><input aria-label="Buscar productos" placeholder="Buscar en CloudShop" value={search} onChange={e => setSearch(e.target.value)}/></label></div>
       <div className="filters">
-        <div className="categories" aria-label="Categorías">
-          <button aria-pressed={categoryId === ''} className={categoryId === '' ? 'selected' : ''} onClick={() => selectCategory('')}>Todos</button>
-          {categories.map(c => <button key={c.id} aria-pressed={categoryId === String(c.id)} className={categoryId === String(c.id) ? 'selected' : ''} onClick={() => selectCategory(String(c.id))}>{c.nombre}</button>)}
-        </div>
-        <label className="sort">Ordenar por <select aria-label="Ordenar productos" value={sort} onChange={e => setSort(e.target.value)}><option value="default">Destacados</option><option value="asc">Menor precio</option><option value="desc">Mayor precio</option></select></label>
+        <label className="filter-select"><span>Categoría</span><select aria-label="Filtrar por categoría" value={categoryId} onChange={e => selectCategory(e.target.value)}><option value="">Todas las categorías</option>{categories.map(c => <option key={c.id} value={String(c.id)}>{c.nombre}</option>)}</select></label>
+        <label className="filter-select sort"><span>Ordenar por</span><select aria-label="Ordenar productos" value={sort} onChange={e => setSort(e.target.value)}><option value="default">Destacados</option><option value="asc">Menor precio</option><option value="desc">Mayor precio</option></select></label>
       </div>
       <div className="results"><span aria-live="polite">{total} productos</span><label><input type="checkbox" checked={available} onChange={e => setAvailable(e.target.checked)}/> Solo disponibles</label></div>
       <RequestState {...request}/>

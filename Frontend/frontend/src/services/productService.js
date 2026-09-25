@@ -1,4 +1,5 @@
 import { api, isDemo } from './api';
+import { cached, invalidate } from './cache';
 
 export let demoCategories = [
   { id: 1, nombre: 'Laptops', descripcion: '' },
@@ -48,24 +49,31 @@ function demoList({ q = '', categoria_id = '', page = 1, limit = 24 } = {}) {
 
 export const productService = {
   async list(params = {}) {
-    if (isDemo) return demoList(params);
-    const query = new URLSearchParams();
-    if (params.q) query.set('q', params.q);
-    if (params.categoria_id) query.set('categoria_id', params.categoria_id);
-    query.set('page', String(params.page || 1));
-    query.set('limit', String(params.limit || 24));
-    const res = await api(`/api/catalogo/productos?${query.toString()}`);
-    return { data: (res.data || []).map(normalizar), total: res.total, page: res.page, limit: res.limit, pages: res.pages };
+    const { q = '', categoria_id = '', page = 1, limit = 24 } = params;
+    return cached(`productos:list:${q}|${categoria_id}|${page}|${limit}`, async () => {
+      if (isDemo) return demoList(params);
+      const query = new URLSearchParams();
+      if (params.q) query.set('q', params.q);
+      if (params.categoria_id) query.set('categoria_id', params.categoria_id);
+      query.set('page', String(params.page || 1));
+      query.set('limit', String(params.limit || 24));
+      const res = await api(`/api/catalogo/productos?${query.toString()}`);
+      return { data: (res.data || []).map(normalizar), total: res.total, page: res.page, limit: res.limit, pages: res.pages };
+    });
   },
   async get(id) {
-    if (isDemo) return demoProducts.find(p => String(p.id) === String(id)) || null;
-    const res = await api(`/api/catalogo/productos/${encodeURIComponent(id)}`);
-    return res.data ? normalizar(res.data) : null;
+    return cached(`productos:get:${id}`, async () => {
+      if (isDemo) return demoProducts.find(p => String(p.id) === String(id)) || null;
+      const res = await api(`/api/catalogo/productos/${encodeURIComponent(id)}`);
+      return res.data ? normalizar(res.data) : null;
+    });
   },
   async categories() {
-    if (isDemo) return demoCategories;
-    const res = await api('/api/catalogo/categorias');
-    return res.data || [];
+    return cached('categorias:list', async () => {
+      if (isDemo) return demoCategories;
+      const res = await api('/api/catalogo/categorias');
+      return res.data || [];
+    });
   },
   // --- Administración (solo admin) ---
   // Los formularios entregan valores de FormData (siempre strings); la API espera
@@ -83,6 +91,7 @@ export const productService = {
     };
     if (!isDemo) {
       const res = await api('/api/catalogo/productos', { method: 'POST', body: JSON.stringify(payload) });
+      invalidate('productos:');
       return normalizar(res.data);
     }
     const categoria = demoCategories.find(c => c.id === payload.categoria_id);
@@ -101,6 +110,7 @@ export const productService = {
       activo: true,
     };
     demoProducts = [...demoProducts, producto];
+    invalidate('productos:');
     return producto;
   },
   async updateProduct(id, values) {
@@ -114,42 +124,65 @@ export const productService = {
 
     if (!isDemo) {
       const res = await api(`/api/catalogo/productos/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      invalidate('productos:');
       return normalizar(res.data);
     }
     const categoria = payload.categoria_id !== undefined ? demoCategories.find(c => c.id === payload.categoria_id) : null;
     demoProducts = demoProducts.map(p => String(p.id) === String(id)
       ? { ...p, ...payload, categoria: categoria ? categoria.nombre : p.categoria }
       : p);
+    invalidate('productos:');
     return demoProducts.find(p => String(p.id) === String(id));
   },
   async deleteProduct(id) {
-    if (!isDemo) return api(`/api/catalogo/productos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!isDemo) {
+      const res = await api(`/api/catalogo/productos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      invalidate('productos:');
+      return res;
+    }
     demoProducts = demoProducts.map(p => String(p.id) === String(id) ? { ...p, activo: false } : p);
+    invalidate('productos:');
     return { message: 'Producto desactivado correctamente' };
   },
   async createCategory(values) {
     if (!isDemo) {
       const res = await api('/api/catalogo/categorias', { method: 'POST', body: JSON.stringify(values) });
+      invalidarCatalogo();
       return res.data;
     }
     const categoria = { id: nextCategoryId++, nombre: values.nombre, descripcion: values.descripcion || '' };
     demoCategories = [...demoCategories, categoria];
+    invalidarCatalogo();
     return categoria;
   },
   async updateCategory(id, values) {
     if (!isDemo) {
       const res = await api(`/api/catalogo/categorias/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(values) });
+      invalidarCatalogo();
       return res.data;
     }
     demoCategories = demoCategories.map(c => String(c.id) === String(id) ? { ...c, ...values } : c);
+    invalidarCatalogo();
     return demoCategories.find(c => String(c.id) === String(id));
   },
   async deleteCategory(id) {
-    if (!isDemo) return api(`/api/catalogo/categorias/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!isDemo) {
+      const res = await api(`/api/catalogo/categorias/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      invalidarCatalogo();
+      return res;
+    }
     if (demoProducts.some(p => String(p.categoria_id) === String(id))) {
       throw new Error('No se puede eliminar: hay productos asignados a esta categoría.');
     }
     demoCategories = demoCategories.filter(c => String(c.id) !== String(id));
+    invalidarCatalogo();
     return { message: 'Categoría eliminada correctamente' };
   },
 };
+
+// El nombre de la categoría aparece denormalizado en los productos, así que un
+// cambio de categorías también invalida las listas/detalles de productos.
+function invalidarCatalogo() {
+  invalidate('categorias:');
+  invalidate('productos:');
+}

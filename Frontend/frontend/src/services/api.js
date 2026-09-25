@@ -11,11 +11,12 @@ function mensajeDeError(data, status) {
   return `No se pudo completar la solicitud (${status}).`;
 }
 export async function api(path, options = {}) {
-  if (!base) throw new Error('Falta configurar la URL del API Gateway.');
+  // base vacío es válido: usa rutas relativas al origen, para el proxy de Amplify
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const { timeoutMs = 12000, ...fetchOptions } = options;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${base}${path}`, { ...options, signal: controller.signal, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers } });
+    const response = await fetch(`${base}${path}`, { ...fetchOptions, signal: controller.signal, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...fetchOptions.headers } });
     const data = response.status === 204 ? null : await response.json().catch(() => null);
     if (!response.ok) throw new Error(mensajeDeError(data, response.status));
     return data;

@@ -21,7 +21,17 @@ export const authService = {
     users.push(user);
     return { user: publicUser(user), access_token: null };
   },
-  async profile(id) { return isDemo ? publicUser(users.find(u => String(u.id) === String(id))) : api(`/usuarios/${encodeURIComponent(id)}`); },
+  async profile(id) {
+    if (!isDemo) return api(`/usuarios/${encodeURIComponent(id)}`);
+    const user = users.find(u => String(u.id) === String(id));
+    if (user) return publicUser(user);
+    // Tras recargar, la lista demo se reinicia; recuperamos el usuario de la sesión persistida.
+    try {
+      const sesion = JSON.parse(localStorage.getItem('cs:sesion') || 'null');
+      if (sesion?.user && String(sesion.user.id) === String(id)) return sesion.user;
+    } catch { /* ignore */ }
+    return null;
+  },
   async update(id, values) {
     if (!isDemo) return api(`/usuarios/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(values) });
     users = users.map(u => String(u.id) === String(id) ? { ...u, ...values } : u);
@@ -35,9 +45,16 @@ export const authService = {
     return address;
   },
   // --- Administración (solo admin) ---
-  async listUsers() {
-    if (!isDemo) return api('/usuarios?page=1&limit=100');
-    return { data: users.map(publicUser), total: users.length, page: 1, limit: users.length };
+  async listUsers({ page = 1, limit = 20 } = {}) {
+    if (!isDemo) {
+      const res = await api(`/usuarios?page=${page}&limit=${limit}`);
+      const usedLimit = res.limit ?? limit;
+      const total = res.total ?? (res.data || []).length;
+      // El backend de usuarios devuelve total pero no pages: lo calculamos aquí.
+      return { data: res.data || [], total, page: res.page ?? page, limit: usedLimit, pages: res.pages ?? Math.max(1, Math.ceil(total / usedLimit)) };
+    }
+    const start = (page - 1) * limit;
+    return { data: users.map(publicUser).slice(start, start + limit), total: users.length, page, limit, pages: Math.max(1, Math.ceil(users.length / limit)) };
   },
   async setRol(id, rol) {
     if (!isDemo) return api(`/usuarios/${encodeURIComponent(id)}/rol`, { method: 'PATCH', body: JSON.stringify({ rol }) });

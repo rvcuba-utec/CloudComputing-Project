@@ -1,92 +1,91 @@
 # CloudShop · Frontend
 
-SPA en **React JavaScript + Vite**. Solo microservicios 1 (usuarios) y 2 (catálogo e inventario). No incluye carrito, pagos, órdenes, reseñas, analítica ni backend.
+Aplicación React + Vite integrada en `Frontend/frontend`. El código de la interfaz corresponde a [cloudshop-frontend, commit b99e5ee](https://github.com/Maxwell-CS/cloudshop-frontend/commit/b99e5eed87cf2983f62d573d153bd134f5c3dd4f). Consume los microservicios de este repositorio a través de una URL pública HTTPS.
 
-## Ejecutar
+## Ejecutar localmente
 
-Requiere Node.js 22 o superior y npm.
+Requiere Node.js 22 o superior y npm. Desde la raíz de CloudComputing-Project:
 
 ```powershell
-cd frontend
+cd Frontend/frontend
 npm ci
 Copy-Item .env.example .env
 npm run dev
 ```
 
-Abre la URL que indique Vite. Para compilar: `npm run build`. Para revisar la compilación: `npm run preview`.
+Crea `.env` únicamente si no existe; conserva tus variables locales. Vite muestra la dirección local disponible, normalmente `http://127.0.0.1:5173`.
 
-## Páginas
+Para compilar: `npm run build`. Los archivos publicados se generan en `dist/`. Para revisar esa compilación: `npm run preview`.
 
-| Ruta | Alcance |
+## Funciones disponibles
+
+| Ruta | Funciones |
 |---|---|
-| `/productos` | Catálogo, búsqueda, categorías, orden por precio y filtro de stock |
-| `/productos/:id` | Detalle, especificaciones, precio y unidades disponibles |
-| `/login` | Inicio de sesión |
-| `/registro` | Registro con confirmación de contraseña |
-| `/perfil` | Consulta y edición de nombre, listado y alta de direcciones |
+| `/productos` | Búsqueda, selector de categorías, paginación, orden por precio y filtro de disponibilidad |
+| `/productos/:id` | Detalle, precio, stock, reseñas y selección de cantidades para el carrito |
+| `/carrito` | Acumulación de productos, cambio de cantidades, eliminación, previsualización y confirmación |
+| `/login`, `/registro` | Inicio de sesión y creación de cuenta |
+| `/perfil` | Nombre, direcciones, historial de compras y cierre de sesión |
+| `/admin` | Productos, categorías, usuarios y analítica; requiere rol `admin` |
 
-El inventario se consulta desde los productos. Reservar/liberar stock corresponde al futuro flujo de órdenes; no se incluye un panel administrativo sin un contrato de roles.
+El carrito persiste en `localStorage` y no reserva inventario. Al comprar, el frontend envía identificadores y cantidades al servicio de órdenes para validar precios y disponibilidad. Tras la confirmación, vacía el carrito e invalida la caché del catálogo y las ventas.
 
-## Modo demo
+La sesión guarda el usuario público y el token de acceso en `localStorage`; las solicitudes usan `Authorization: Bearer`. El backend comprueba autenticación y permisos. La identidad pertenece al microservicio de usuarios, no a Amplify Auth/Cognito.
 
-Activo por defecto (`VITE_USE_MOCKS=true`). Cuenta: **demo@cloudshop.pe**, contraseña: **CloudShop123**.
-Permite probar registro, login, edición de nombre y alta de direcciones. Todos los datos son ilustrativos. Las cuentas creadas y sus direcciones viven en memoria y desaparecen al recargar; no se guarda nada en una base de datos. No usar datos personales reales. Las imágenes son ilustraciones SVG locales de productos ficticios. No hay autenticación de producción en la demo.
+## Datos locales y conexión real
 
-## Conectar el API Gateway
+Con `VITE_USE_MOCKS=true` se utilizan datos de prueba. Las cuentas locales incluidas son:
 
-Configura en `.env` local o en las variables de compilación de Amplify:
+- Usuario: `demo@cloudshop.pe` / `CloudShop123`.
+- Administrador: `admin@cloudshop.pe` / `AdminPass123`.
+
+Las direcciones, compras y cambios del catálogo de prueba viven en memoria. El carrito y la sesión persisten en el navegador. La analítica muestra una vista con datos ilustrativos únicamente en el servidor de desarrollo cuando el modo de prueba está activo. Una compilación de producción en modo de prueba muestra el aviso de conexión a AWS.
+
+Para utilizar las APIs reales, configura:
 
 ```dotenv
 VITE_USE_MOCKS=false
 VITE_API_BASE_URL=https://TU_GATEWAY.execute-api.REGION.amazonaws.com
 ```
 
-La URL debe incluir el stage cuando tu API Gateway lo use (p. ej. `.../amazonaws.com/prod`). El frontend agrega los prefijos reales de cada microservicio: el catálogo vive bajo `/api/catalogo/...` y los usuarios bajo `/usuarios/...`. Cambiar variables requiere recompilar. Las variables `VITE_*` son públicas: nunca colocar secretos AWS. El navegador solo accede al API Gateway HTTPS; no accede al balanceador, EC2 ni bases privadas. No se usa Amplify Auth/Cognito: la identidad pertenece al microservicio FastAPI.
+Incluye el stage si tu API lo requiere. El frontend agrega los prefijos de cada servicio; no añadas `/api` a la URL base. Las variables `VITE_*` se incluyen en los archivos públicos de la compilación. Las credenciales de AWS permanecen en el servidor.
 
-**Contrato (final, ver `Proposal/03_Sustentacion_final.md`):** las rutas y respuestas ya coinciden con el backend implementado. La normalización vive en `src/services/authService.js` y `productService.js`; la UI permanece separada.
+| Servicio | Rutas consumidas |
+|---|---|
+| Usuarios | `/usuarios/auth/login`, `/usuarios/auth/register`, perfil, direcciones, listado y roles |
+| Catálogo | `/api/catalogo/productos`, `/api/catalogo/categorias` y operaciones administrativas |
+| Órdenes | `POST /ordenes/previsualizar`, `POST /ordenes/confirmar` |
+| Ventas y reseñas | `GET /usuarios/{id}/ventas`, `GET/POST /productos/{id}/resenas` |
+| Analítica | `GET /analitica/{consulta}`, con token de administrador |
 
-| Método | Ruta relativa a base URL | Entrada / respuesta |
-|---|---|---|
-| POST | `/usuarios/auth/login` | `{email,password}` → `{user,access_token}` |
-| POST | `/usuarios/auth/register` | `{nombre,email,password}` → `{user,access_token}` (201) |
-| GET | `/usuarios/me` | Perfil desde el token `{id,nombre,email,estado}` |
-| GET | `/usuarios/{id}` | Perfil propio (403 si no es el dueño) |
-| PATCH | `/usuarios/{id}` | `{nombre?}` → perfil actualizado |
-| GET | `/usuarios/{id}/direcciones` | Array de direcciones |
-| POST | `/usuarios/{id}/direcciones` | `{direccion,distrito,ciudad,pais}` → dirección con `id` (201) |
-| PATCH | `/usuarios/{id}/direcciones/{dir_id}` | `{es_principal:true}` → marca principal |
-| DELETE | `/usuarios/{id}/direcciones/{dir_id}` | Elimina (204) |
-| GET | `/api/catalogo/categorias` | `{data:[{id,nombre,descripcion}],total}` |
-| GET | `/api/catalogo/productos` | `{data,total,page,limit,pages}`; query `page`,`limit`,`categoria_id`,`q`,`precio_min`,`precio_max`,`solo_activos` |
-| GET | `/api/catalogo/productos/{id}` | `{data:{producto}}`; 404 si no existe |
+Los seis reportes son ticket promedio, productos más vendidos, ventas por categoría, ventas por ciudad, calificación y ventas, y clientes frecuentes. La interfaz usa rankings compactos, agrupaciones por calificación, tendencias mensuales, resúmenes derivados de la respuesta y tablas desplegables. La caché del cliente mantiene resultados analíticos durante cinco minutos.
 
-Producto normalizado por `productService.js`: `{id,nombre,marca,categoria,categoria_id,sku,precio,precio_oferta,stock,descripcion,imagen_url,origen_url}`. `categoria` viene de `categoria_nombre`; `stock` de `stock_disponible`; `precio_oferta` es `null` cuando no hay oferta. Las propiedades `tipo` y `color` solo apoyan las ilustraciones de la demo y no llegan de la API real.
+Los errores de conexión o del backend se muestran con opciones de reintento; no activan datos de prueba automáticamente.
 
-El login es JSON (no OAuth2 form-urlencoded). El frontend envía el token como `Authorization: Bearer`; lo conserva solo en memoria y solicita iniciar sesión nuevamente al recargar. El backend valida la propiedad del perfil/direcciones en cada operación. Habilitar CORS (en el API Gateway o en los servicios) para el origen Amplify y local, los métodos GET/POST/PATCH/DELETE/OPTIONS y los headers Content-Type/Authorization. Los errores muestran el texto de `detail` (FastAPI) o `error.message` (Go) según el servicio; no hay fallback silencioso a demo si la API falla.
+## Amplify desde este repositorio
 
-## Desplegar en AWS Amplify Hosting
+El archivo `amplify.yml` de la raíz contiene la configuración para este monorepositorio. `Frontend/amplify.yml` conserva una copia equivalente.
 
-### Desde Git (recomendado)
+Al conectar **rvcuba-utec/CloudComputing-Project** en Amplify:
 
-1. Sube este repositorio a tu proveedor Git.
-2. En Amplify Hosting crea una app, conecta repositorio y rama. Selecciona monorepo y carpeta raíz **frontend**; la variable `AMPLIFY_MONOREPO_APP_ROOT` debe ser `frontend`.
-3. Usa el `amplify.yml` de la raíz: `npm ci`, `npm run build`, artefactos `dist` dentro de frontend. Usa Node.js 22 o superior.
-4. Para demo configura `VITE_USE_MOCKS=true`. Para APIs reales, configura las variables del apartado anterior.
-5. Compila y despliega. En **Hosting → Rewrites and redirects**, importa el contenido de `frontend/amplify-rewrites.json`. Es una reescritura HTTP **200** a `/index.html` para navegación SPA. Este JSON es una referencia para la consola, **Amplify no lo aplica automáticamente**.
-6. Comprueba la URL pública y recarga directamente `/productos/1`, `/login` y `/perfil`. Esta última redirigirá al login si no hay sesión en memoria.
+1. Selecciona la carpeta de la aplicación `Frontend/frontend`.
+2. Comprueba `AMPLIFY_MONOREPO_APP_ROOT=Frontend/frontend`.
+3. Usa `npm ci` y `npm run build`; los artefactos son `dist` dentro de esa carpeta.
+4. Configura `VITE_USE_MOCKS=false` y la URL HTTPS real en `VITE_API_BASE_URL`.
+5. Aplica las reescrituras SPA de `Frontend/frontend/amplify-rewrites.json` en la consola de Amplify. Ese archivo no se importa automáticamente.
+6. Verifica CORS para el dominio publicado y los encabezados `Content-Type` y `Authorization`.
 
-### Carga manual
+La ruta `Frontend/frontend` distingue mayúsculas y minúsculas en la compilación de Linux. Debe coincidir con la configuración de la consola, tal como indica la [documentación de monorepositorios de Amplify](https://docs.aws.amazon.com/amplify/latest/userguide/monorepo-configuration.html).
 
-Ejecuta `npm run build` dentro de frontend. Comprime **el contenido** de `frontend/dist` (index.html debe estar en la raíz del ZIP) y cárgalo mediante la opción de despliegue sin proveedor Git de Amplify. Aplica también la reescritura SPA anterior. La carpeta `artifacts` puede contener un ZIP ya preparado para la demo.
-
-Fuentes oficiales: [Vite en Amplify](https://docs.amplify.aws/gen1/javascript/deploy-and-host/frameworks/deploy-vite-site/), [reescrituras SPA](https://docs.aws.amazon.com/amplify/latest/userguide/redirect-rewrite-examples.html), [carga manual](https://docs.aws.amazon.com/amplify/latest/userguide/manual-deploys.html).
+Esta integración actualiza el código en CloudComputing-Project. No cambia la vinculación de una aplicación de Amplify que siga conectada al repositorio independiente cloudshop-frontend.
 
 ## Estructura
 
-`frontend/src/` contiene `components/`, `pages/`, `hooks/`, `services/`, `contexts/`, `utils/`, `assets/`, `App.jsx` y `main.jsx`; `frontend/public/` admite archivos estáticos. Se usa JSX/JS para seguir React JavaScript de la arquitectura; la captura TSX se tomó como guía de carpetas.
+- `src/pages/`: catálogo, detalle, carrito, cuenta y administración.
+- `src/components/`: navegación, formularios, tarjetas y paginación.
+- `src/contexts/`: sesión y carrito compartidos.
+- `src/services/`: cliente HTTP, caché y acceso a los microservicios.
+- `src/hooks/`: acceso a contextos y estados de consulta.
+- `src/styles.css`: estilos de la aplicación.
 
-## Diseño y alcance pendiente
-
-Dirección: sencilla, sobria y cercana. Catálogo de densidad equilibrada, navegación superior, tipografía DM Sans con respaldo Arial, fondo cálido, acento verde, bordes discretos y cuadrícula de productos. Se priorizan precio, disponibilidad y búsqueda. La alternativa de una portada promocional se descartó porque esta entrega necesita catálogo y cuenta. No se agregan métricas, promociones, testimonios ni promesas comerciales inventadas.
-
-Auditoría visual: sin gradientes, sombras decorativas, tarjetas de indicadores o panel genérico. Los productos tienen ilustraciones técnicas y las pantallas de formularios tienen su propia distribución. Los datos de ejemplo se documentan aquí; la interfaz pública no muestra avisos de demostración ni credenciales. Próxima iteración: acordar OpenAPI de ambos servicios y reemplazar el catálogo ficticio con productos reales. No se ha desplegado una app en una cuenta AWS desde este repositorio.
+Las comprobaciones de esta integración se documentan en `frontend/VALIDACION.md`.
